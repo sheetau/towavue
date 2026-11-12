@@ -425,7 +425,7 @@ fn deleted_filmstrip_keeps_a_local_held_entry_and_can_navigate_to_real_media() {
                 events,
                 ..Default::default()
             },
-            |_| app.draw_filmstrip(&context, context.content_rect(), &mut actions),
+            |_| app.draw_filmstrip(&context, context.content_rect(), None, &mut actions),
         );
         (output, actions)
     };

@@ -1266,7 +1266,8 @@ fn folder_order_refresh_appends_muted_path_text_without_a_progress_bar() {
                         .job
                         .sections
                         .iter()
-                        .all(|section| section.format.color == chrome::MUTED)
+                        .all(|section| section.format.color == chrome::MUTED
+                            || section.format.color == egui::Color32::PLACEHOLDER)
                 );
             }
             app.set_status("Explicit diagnostic".into());

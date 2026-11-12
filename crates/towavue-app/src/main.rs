@@ -99,6 +99,7 @@ mod source_backing;
 mod source_save;
 mod speed_edit;
 mod startup_graphics;
+mod status_bar;
 mod status_file_details;
 mod status_info;
 mod subtitles;
@@ -335,6 +336,7 @@ enum UiAction {
     Subtitle(Option<TabId>, u64, subtitles::Action),
     KeybindingChange(TabId, keyboard_settings::Change),
     ConfigureKeybinding(CommandId),
+    StatusPalette(&'static str),
     HoldSpeed(u64, PlaybackGeneration, hold_speed::Action),
     Command(CommandId),
     BeginReadingDrag(egui::Pos2, egui::Vec2),
@@ -4558,7 +4560,7 @@ where
         }
         if self.filmstrip_open {
             if !modal_blocked || self.source_save.frozen {
-                self.draw_filmstrip(&context, media_panel.response.rect, actions);
+                self.draw_filmstrip(&context, media_panel.response.rect, status_rect, actions);
             }
         } else if !self.image_seek_preview_active && self.path.is_some() {
             self.prepare_filmstrip(&context);
@@ -6706,543 +6708,6 @@ where
             .update(self.status_file_source(), self.notify.clone());
     }
 
-    fn draw_status_bar(
-        &self,
-        root: &mut egui::Ui,
-        actions: &mut Vec<UiAction>,
-        volume_targets: &mut Vec<egui::Response>,
-    ) -> egui::Rect {
-        let language = self.language();
-        let mut frame = chrome::bar();
-        frame.inner_margin.left = if self.media_kind.is_none() {
-            (chrome::STATUS_BUTTON_GAP * 2.0) as i8
-        } else {
-            chrome::STATUS_BUTTON_GAP as i8
-        };
-        frame.inner_margin.right = (chrome::STATUS_BUTTON_GAP * 2.0) as i8;
-        let density = root.ctx().pixels_per_point();
-        // Anchor to the physical edge, not the sum of independently rounded child widths.
-        let info_right = ((root.max_rect().right() * density).round()
-            - (f32::from(frame.inner_margin.right) * density).round())
-            / density;
-        egui::Panel::bottom("status")
-            .exact_size(chrome::STATUS_HEIGHT)
-            .show_separator_line(!self.timeline_is_visible() && !self.animation_timeline_visible())
-            .frame(frame)
-            .show(root, |ui| {
-                // Give padding its own non-focusable target before the controls,
-                // so egui's nearest-widget hit assistance cannot click a nearby button.
-                ui.interact(
-                    ui.max_rect() + frame.inner_margin,
-                    ui.id().with("status-padding"),
-                    egui::Sense::CLICK | egui::Sense::DRAG,
-                );
-                ui.horizontal_centered(|ui| {
-                    ui.spacing_mut().item_spacing.x = chrome::STATUS_BUTTON_GAP;
-                    ui.spacing_mut().interact_size = egui::Vec2::splat(chrome::STATUS_BUTTON_SIZE);
-                    ui.spacing_mut().button_padding = egui::Vec2::ZERO;
-                    let info = self.status_info();
-                    if self.update_is_held() {
-                        self.draw_update_status(ui, actions);
-                        return;
-                    }
-                    if self.media_kind.is_some_and(|kind| kind != MediaKind::Image) {
-                        let playing = self.state == PlaybackState::Playing;
-                        let play = ui
-                            .add_enabled_ui(!self.command_context().playback_blocked, |ui| {
-                                chrome::transport_button(
-                                    ui,
-                                    self.track_drag
-                                        .as_ref()
-                                        .and_then(track_drag::Drag::icon)
-                                        .unwrap_or(if playing {
-                                            chrome::Icon::Pause
-                                        } else {
-                                            chrome::Icon::Play
-                                        }),
-                                    &self.command_hint(
-                                        CommandId::TogglePause,
-                                        if playing {
-                                            localization::Text::Pause.in_language(language)
-                                        } else {
-                                            localization::Text::PlayReplay.in_language(language)
-                                        },
-                                    ),
-                                )
-                            })
-                            .inner
-                            .disabled_help_text(
-                                if self.playback_duration() == Some(Duration::ZERO) {
-                                    localization::Text::TimelineEmptyHelp.in_language(language)
-                                } else {
-                                    localization::Text::PlaybackUnavailableHelp
-                                        .in_language(language)
-                                },
-                            );
-                        let dragging = self.track_drag.is_some();
-                        if !dragging
-                            && self.held_speed.is_none()
-                            && let Some((origin, delta)) = track_drag::completed(&play)
-                        {
-                            actions.push(UiAction::BeginTrackDrag(
-                                self.media_generation,
-                                origin,
-                                delta,
-                                true,
-                            ));
-                        } else if !dragging
-                            && self.held_speed.is_none()
-                            && play.drag_started_by(egui::PointerButton::Primary)
-                            && ui.input(|input| {
-                                input.pointer.primary_down() && input.modifiers.is_none()
-                            })
-                            && let Some((origin, position)) = ui.input(|input| {
-                                input
-                                    .pointer
-                                    .press_origin()
-                                    .zip(input.pointer.interact_pos())
-                            })
-                            && (position.x - origin.x).abs() > (position.y - origin.y).abs()
-                        {
-                            actions.push(UiAction::BeginTrackDrag(
-                                self.media_generation,
-                                origin,
-                                position - origin,
-                                false,
-                            ));
-                        }
-                        let held = !dragging && self.hold_response(&play, actions);
-                        if play.clicked() && !held && !dragging {
-                            actions.push(UiAction::Command(CommandId::TogglePause));
-                        }
-                        if self.media_kind == Some(MediaKind::Audio) {
-                            self.draw_audio_mode_buttons(ui, actions);
-                        } else if chrome::audio_button(
-                            ui,
-                            chrome::AudioIcon::Repeat,
-                            self.video_repeat,
-                            &self.command_hint(
-                                CommandId::ToggleVideoRepeat,
-                                if self.video_repeat {
-                                    localization::Text::VideoRepeatOff.in_language(language)
-                                } else {
-                                    localization::Text::VideoRepeatOn.in_language(language)
-                                },
-                            ),
-                        )
-                        .clicked()
-                        {
-                            actions.push(UiAction::Command(CommandId::ToggleVideoRepeat));
-                        }
-                        let clock_format = if self.timeline_is_visible() {
-                            format_time_precise
-                        } else {
-                            format_time
-                        };
-                        let duration = self
-                            .playback_duration()
-                            .map(|duration| clock_format(MediaTime::ZERO.saturating_add(duration)))
-                            .unwrap_or_else(|| "—".into());
-                        let position = clock_format(self.current_position());
-                        let compact = ui.max_rect().width() < 340.0;
-                        let mut time_text = egui::text::LayoutJob::default();
-                        let format = egui::TextFormat {
-                            font_id: egui::FontId::proportional(crate::chrome::TEXT_LG),
-                            color: chrome::MUTED,
-                            ..Default::default()
-                        };
-                        time_text.append(&position, 0.0, format.clone());
-                        if let Some(delta) = self.relative_seek_text() {
-                            time_text.append(
-                                &format!(" {delta}"),
-                                0.0,
-                                egui::TextFormat {
-                                    color: chrome::FOREGROUND,
-                                    ..format.clone()
-                                },
-                            );
-                        }
-                        let full_time = format!("{} / {duration}", time_text.text);
-                        if !compact {
-                            time_text.append(&format!(" / {duration}"), 0.0, format);
-                        }
-                        if compact {
-                            // Keep volume and mode controls visible before truncating a long clock.
-                            let controls_width = 40.0
-                                + ui.spacing().item_spacing.x
-                                + if self.active_export.is_some() {
-                                    100.0
-                                } else {
-                                    0.0
-                                };
-                            let time_width = (ui.available_width() - controls_width).max(0.0);
-                            ui.allocate_ui_with_layout(
-                                egui::vec2(time_width, 24.0),
-                                egui::Layout::left_to_right(egui::Align::Center),
-                                |ui| {
-                                    ui.add(
-                                        egui::Label::new(time_text)
-                                            .truncate()
-                                            .show_tooltip_when_elided(false),
-                                    )
-                                },
-                            )
-                            .inner
-                            .help_text(full_time);
-                        } else {
-                            ui.label(time_text);
-                        }
-                        let volume = ui
-                            .add_sized(
-                                [40.0, 24.0],
-                                egui::Label::new(
-                                    if self.playback_volume() == 0.0 {
-                                        chrome::Icon::Muted.text()
-                                    } else {
-                                        RichText::new(format!(
-                                            "{:.0}%",
-                                            self.playback_volume() * 100.0
-                                        ))
-                                        .size(chrome::TEXT_LG)
-                                    }
-                                    .color(chrome::MUTED),
-                                ),
-                            )
-                            .help_text(
-                                localization::Text::PlaybackVolumeHelp.in_language(language),
-                            );
-                        volume_targets.push(volume);
-                    } else if self.animation_timeline_visible() {
-                        self.draw_animation_transport(ui, actions);
-                    } else if self.media_kind == Some(MediaKind::Image) {
-                        let label = self.command_hint(
-                            CommandId::ToggleReadingMode,
-                            localization::Text::ReadingMode.in_language(language),
-                        );
-                        let enabled = self.reading_control_enabled();
-                        let direction = self
-                            .reading_drag
-                            .as_ref()
-                            .filter(|drag| !drag.was_enabled)
-                            .and_then(|drag| drag.direction)
-                            .or_else(|| {
-                                self.reading_mode.then_some(self.reading_settings.reversed)
-                            });
-                        let response =
-                            chrome::reading_button(ui, enabled, self.reading_mode, direction);
-                        if let Some(drag) = &self.reading_drag {
-                            // A pending spread may temporarily disable the button, but
-                            // the pinned gesture still owns its cursor until release.
-                            ui.ctx().set_cursor_icon(if drag.was_enabled {
-                                egui::CursorIcon::Move
-                            } else {
-                                egui::CursorIcon::ResizeHorizontal
-                            });
-                        }
-                        response.widget_info(|| {
-                            egui::WidgetInfo::labeled(
-                                egui::WidgetType::Button,
-                                response.enabled(),
-                                &label,
-                            )
-                        });
-                        if response.drag_started_by(egui::PointerButton::Primary)
-                            && ui.input(|input| {
-                                input.pointer.primary_down() && input.modifiers.is_none()
-                            })
-                            && let Some((origin, position)) = ui.input(|input| {
-                                input
-                                    .pointer
-                                    .press_origin()
-                                    .zip(input.pointer.interact_pos())
-                            })
-                        {
-                            actions.push(UiAction::BeginReadingDrag(origin, position - origin));
-                        }
-                        if response.clicked() {
-                            actions.push(UiAction::Command(CommandId::ToggleReadingMode));
-                        }
-                        response
-                            .help_ui(|ui| {
-                                ui.label(label);
-                                ui.label(localization::Text::ReadingDragHelp.in_language(language));
-                            })
-                            .disabled_help_text(
-                                localization::Text::ReadingUnsavedHelp.in_language(language),
-                            );
-                        if let Some(position) = &info.image_position {
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(position)
-                                        .size(crate::chrome::TEXT_LG)
-                                        .color(chrome::MUTED),
-                                )
-                                .truncate()
-                                .show_tooltip_when_elided(false),
-                            )
-                            .help_text(info.folder_tooltip());
-                        }
-                    }
-                    let full_info = info.tooltip();
-                    let details = info.fields;
-                    let remaining = ui.available_width();
-                    let field_gap = status_info::field_gap(ui);
-                    let info_width = if details.is_empty() {
-                        0.0
-                    } else {
-                        remaining * 0.52
-                    };
-                    let info_width = if self.active_export.is_some() {
-                        info_width.min((remaining - 80.0 - field_gap).max(0.0))
-                    } else {
-                        info_width
-                    };
-                    // The proportional limit chooses a whole-field prefix, not a
-                    // reserved empty column. Give all unused space back to the path.
-                    let info_galley = status_info::fitting_text(
-                        ui,
-                        &details,
-                        ((info_width * density).floor() - 1.0).max(0.0) / density,
-                    );
-                    let info_width = info_galley.as_ref().map_or(0.0, |galley| {
-                        (galley.size().x * density).ceil() / density + 1.0 / density
-                    });
-                    let gap = if info_galley.is_some() {
-                        field_gap
-                    } else {
-                        0.0
-                    };
-                    ui.spacing_mut().item_spacing.x = gap;
-                    let path_width = (remaining - info_width - gap).max(0.0);
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(path_width, 24.0),
-                        egui::Layout::left_to_right(egui::Align::Center),
-                        |ui| {
-                            ui.set_min_width(path_width);
-                            if let Some(export) = self
-                                .active_export
-                                .as_ref()
-                                .filter(|_| self.export_error.is_none())
-                            {
-                                let (slot, _) = ui.allocate_exact_size(
-                                    egui::vec2(path_width, 24.0),
-                                    egui::Sense::hover(),
-                                );
-                                export_progress::show_status(
-                                    ui.ctx(),
-                                    slot,
-                                    (ui.layer_id().order == egui::Order::Middle)
-                                        .then_some(ui.layer_id()),
-                                    export,
-                                    self.export_gesture_hint(),
-                                    !self.dialog_input_blocked(),
-                                    actions,
-                                );
-                                return;
-                            }
-                            let selection_hint = (!self.modal_input_blocked()
-                                && self.reading_drag.is_none())
-                            .then(|| {
-                                selection::focus_hint(ui.ctx()).or_else(|| {
-                                    self.timeline_is_visible()
-                                        .then(|| time_selection::focus_hint(ui.ctx()))
-                                        .flatten()
-                                })
-                            })
-                            .flatten();
-                            let mut export_link = None;
-                            let mut reading_adjustment = None;
-                            let (text, color, tooltip) = if let Some(message) =
-                                self.visual_selection_status().filter(|_| {
-                                    matches!(
-                                        self.view_drag,
-                                        Some(
-                                            ViewDrag::Selection { .. }
-                                                | ViewDrag::MoveSelection { .. }
-                                        )
-                                    )
-                                }) {
-                                (message.clone(), chrome::FOREGROUND, message)
-                            } else if let Some(message) = selection_hint {
-                                (message.clone(), chrome::FOREGROUND, message)
-                            } else if let Some(message) = self.status_notice() {
-                                reading_adjustment = self.reading_adjustment_hint();
-                                export_link =
-                                    self.export_notice.as_ref().map(|(shown, _)| *shown).filter(
-                                        |shown| self.export_notice_target(*shown).is_some(),
-                                    );
-                                (
-                                    self.compact_export_notice(&message)
-                                        .unwrap_or_else(|| message.clone()),
-                                    chrome::FOREGROUND,
-                                    message,
-                                )
-                            } else if let Some(path) = self.displayed_image_path() {
-                                let parent = path
-                                    .parent()
-                                    .and_then(Path::file_name)
-                                    .map(|name| name.to_string_lossy())
-                                    .unwrap_or_default();
-                                let mut suffix = self
-                                    .visual_selection_status()
-                                    .map_or_else(String::new, |value| format!(" · {value}"));
-                                if let Some(notice) = self.folder_order_notice() {
-                                    suffix.push_str(" · ");
-                                    suffix.push_str(notice);
-                                }
-                                (
-                                    format!(
-                                        "{}{parent}\\{}{suffix}",
-                                        self.deleted_path_prefix(),
-                                        display_name(path)
-                                    ),
-                                    chrome::MUTED,
-                                    format!(
-                                        "{}{}{suffix}",
-                                        self.deleted_path_prefix(),
-                                        path.display()
-                                    ),
-                                )
-                            } else if self.media_kind.is_none()
-                                && !self.keyboard_settings_active()
-                                && let Some(date) = self.gallery_listing.status_date(language)
-                            {
-                                (
-                                    self.gallery_listing.status_name().map_or_else(
-                                        || date.clone(),
-                                        |name| format!("{date} · {name}"),
-                                    ),
-                                    chrome::MUTED,
-                                    towavue_core::localization::formatted::last_opened(
-                                        language, &date,
-                                    ),
-                                )
-                            } else if self.current_document_untitled() {
-                                let suffix = self
-                                    .visual_selection_status()
-                                    .map_or_else(String::new, |value| format!(" · {value}"));
-                                (
-                                    format!("{}{suffix}", image_paste::DEFAULT_NAME),
-                                    chrome::MUTED,
-                                    format!(
-                                        "{}{suffix}",
-                                        localization::Text::StatusPasted.in_language(language)
-                                    ),
-                                )
-                            } else {
-                                (
-                                    if self.keyboard_settings_active() {
-                                        localization::Text::ShortcutEditHint
-                                            .in_language(language)
-                                            .into()
-                                    } else {
-                                        localization::Text::OpenToBegin.in_language(language).into()
-                                    },
-                                    chrome::MUTED,
-                                    towavue_core::localization::formatted::shortcuts_file(
-                                        language,
-                                        &self.shortcut_path.display().to_string(),
-                                    ),
-                                )
-                            };
-                            let reading_hint = self.reading_drag.is_some();
-                            let label: egui::WidgetText = if let Some(hint) = &reading_adjustment {
-                                hint.layout(12.0).into()
-                            } else if reading_hint {
-                                fonts::reading_hint(&text, 12.0, color).into()
-                            } else if let Some(job) = self.hold_progress_label(&text) {
-                                job.into()
-                            } else {
-                                RichText::new(text)
-                                    .size(crate::chrome::TEXT_LG)
-                                    .color(color)
-                                    .into()
-                            };
-                            let response = ui
-                                .add(
-                                    egui::Label::new(label)
-                                        .truncate()
-                                        .show_tooltip_when_elided(false)
-                                        .sense(if export_link.is_some() {
-                                            egui::Sense::click()
-                                        } else {
-                                            egui::Sense::hover()
-                                        }),
-                                )
-                                .help_ui_above(|ui| {
-                                    ui.set_max_width(ui.spacing().tooltip_width);
-                                    if let Some(hint) = &reading_adjustment {
-                                        ui.label(hint.layout(hover_help::TEXT_SIZE));
-                                    } else if reading_hint {
-                                        ui.label(fonts::reading_hint(
-                                            &tooltip,
-                                            hover_help::TEXT_SIZE,
-                                            chrome::FOREGROUND,
-                                        ));
-                                    } else {
-                                        let hint = if export_link.is_some_and(|shown| {
-                                            self.export_notice_open_target(shown).is_some()
-                                        }) {
-                                            localization::Text::ExportLinkOpenHelp
-                                                .in_language(language)
-                                        } else if export_link.is_some() {
-                                            localization::Text::ExportLinkRevealHelp
-                                                .in_language(language)
-                                        } else {
-                                            ""
-                                        };
-                                        ui.label(format!("{tooltip}{hint}"));
-                                    }
-                                });
-                            if let Some(shown) = export_link {
-                                response.widget_info(|| {
-                                    egui::WidgetInfo::labeled(
-                                        egui::WidgetType::Button,
-                                        response.enabled(),
-                                        localization::Text::RevealExportedFile
-                                            .in_language(language),
-                                    )
-                                });
-                                if response.clicked() {
-                                    actions.push(UiAction::RevealExport(shown));
-                                }
-                                if response.clicked_by(egui::PointerButton::Middle)
-                                    && self.export_notice_open_target(shown).is_some()
-                                {
-                                    actions.push(UiAction::OpenExport(shown));
-                                }
-                                response.on_hover_cursor(egui::CursorIcon::PointingHand);
-                            }
-                        },
-                    );
-                    let info_width = (info_right - ui.next_widget_position().x).max(0.0);
-                    let info_response = ui.allocate_ui_with_layout(
-                        egui::vec2(info_width, 24.0),
-                        egui::Layout::right_to_left(egui::Align::Center),
-                        |ui| {
-                            ui.set_min_width(info_width);
-                            let Some(galley) = info_galley else {
-                                return ui.allocate_response(
-                                    egui::vec2(info_width, 24.0),
-                                    egui::Sense::hover(),
-                                );
-                            };
-                            ui.add(
-                                egui::Label::new(galley)
-                                    .extend()
-                                    .show_tooltip_when_elided(false),
-                            )
-                        },
-                    );
-                    if !full_info.is_empty() {
-                        info_response.inner.help_text(full_info);
-                    }
-                });
-            })
-            .response
-            .rect
-    }
-
     fn draw_seek_bar(
         &mut self,
         context: &egui::Context,
@@ -7250,11 +6715,11 @@ where
         parent: Option<egui::LayerId>,
         actions: &mut Vec<UiAction>,
     ) {
-        if self.animation_timeline_visible() {
+        if self.animation_timeline_visible() || self.filmstrip_open {
             return;
         }
         let language = self.language();
-        let enabled = !self.modal_input_blocked() && !self.filmstrip_open;
+        let enabled = !self.modal_input_blocked();
         if self.media_kind == Some(MediaKind::Image) {
             let held_order = self
                 .displayed_tab
@@ -8046,6 +7511,19 @@ where
             UiAction::KeybindingChange(id, change) => {
                 if self.tabs.active_id() == Some(id) {
                     self.apply_keybinding_change(change);
+                }
+            }
+            UiAction::StatusPalette(query) => {
+                if !self.modal_input_blocked() {
+                    if query == "resize"
+                        && self.media_kind == Some(MediaKind::Video)
+                        && !self.timeline_open
+                    {
+                        self.dispatch(CommandId::ToggleTimeline);
+                    }
+                    self.dispatch(CommandId::ToggleCommandPalette);
+                    self.palette.open_commands(query);
+                    self.palette_open = true;
                 }
             }
             UiAction::ConfigureKeybinding(command) => {
@@ -11292,7 +10770,7 @@ where
     }
 
     fn seek_video_percent(&mut self, percent: u8) {
-        if self.media_kind != Some(MediaKind::Video) || percent > 90 {
+        if !matches!(self.media_kind, Some(MediaKind::Video | MediaKind::Audio)) || percent > 90 {
             return;
         }
         let Some(duration) = self
@@ -12410,6 +11888,7 @@ where
         &mut self,
         context: &egui::Context,
         rect: egui::Rect,
+        status: Option<egui::Rect>,
         actions: &mut Vec<UiAction>,
     ) {
         let enabled = !self.palette_open && !self.modal_input_blocked();
@@ -12430,6 +11909,11 @@ where
             .and_then(Path::parent)
             .or_else(|| source.map(|snapshot| snapshot.folder_path.as_path()));
         let mut body = rect;
+        let mut projection_changed = false;
+        let status = status.unwrap_or_else(|| {
+            body.max.y -= chrome::STATUS_HEIGHT;
+            egui::Rect::from_min_max(body.left_bottom(), rect.max)
+        });
         if let Some(folder) = folder {
             self.filmstrip_browser.navigation =
                 [self.history_available(false), self.history_available(true)];
@@ -12438,7 +11922,12 @@ where
                 instance: self.media_generation,
             });
             self.filmstrip_browser.sync_folder(folder, context);
-            if let Some(target) = self.filmstrip_browser.show(context, rect, source, enabled) {
+            self.filmstrip_browser.current_path = self.path.clone();
+            projection_changed = self.filmstrip_browser.project(source).1;
+            if let Some(target) = self
+                .filmstrip_browser
+                .show(context, status, source, enabled)
+            {
                 match target {
                     filmstrip_browser::Action::Menu(intent) => {
                         actions.push(UiAction::ThumbnailMenu(intent))
@@ -12460,10 +11949,9 @@ where
                     }
                 }
             }
-            body.min.y = (body.top() + filmstrip_browser::HEADER_HEIGHT).min(body.bottom());
         }
         let (projected, changed) = self.filmstrip_browser.project(source);
-        if changed {
+        if changed || projection_changed {
             self.filmstrip.filter_changed();
         }
         self.filmstrip.show_with_header(
@@ -12476,7 +11964,6 @@ where
             body.top() - rect.top(),
             rect,
         );
-        self.filmstrip_browser.show_filters(context, rect, enabled);
     }
 
     fn prepare_filmstrip(&mut self, context: &egui::Context) {
@@ -14606,15 +14093,19 @@ mod tests {
                         ..Default::default()
                     },
                     |ui| {
-                        welcome::show(
-                            ui,
-                            &mut crate::browser_controls::Counts::default(),
-                            &mut String::new(),
-                            &mut None,
-                            &[],
-                            true,
-                            |_, _, _| Vec::new(),
-                        );
+                        egui::Panel::bottom("status-test")
+                            .exact_size(30.0)
+                            .frame(egui::Frame::new().inner_margin(3.0))
+                            .show(ui, |ui| {
+                                browser_controls::gallery_status(
+                                    ui,
+                                    egui::Id::new("gallery-search"),
+                                    &[0; 4],
+                                    &mut String::new(),
+                                    &mut None,
+                                    egui::RichText::new(""),
+                                );
+                            });
                     },
                 )
                 .platform_output
@@ -16882,7 +16373,8 @@ mod tests {
                         .iter()
                         .filter_map(|shape| match &shape.shape {
                             egui::Shape::LineSegment { points, stroke }
-                                if stroke.color == chrome::BORDER
+                                if (stroke.color == chrome::BORDER
+                                    || (timeline && stroke.color == chrome::FOREGROUND))
                                     && points[0].x == 0.0
                                     && points[1].x == width
                                     && points[0].y == points[1].y =>
@@ -18607,8 +18099,7 @@ mod tests {
         assert!(texts.iter().any(|(pos, text)| pos.y > 540.0
             && pos.x > 480.0
             && text.contains("PNG")
-            && text.contains("5×3")
-            && text.contains("2 frames")));
+            && text.contains("5×3")));
         app.set_status("Copied fixture".into());
         assert_eq!(app.status_notice().as_deref(), Some("Copied fixture"));
         app.status_message.as_mut().expect("notice").1 = Instant::now() - STATUS_MESSAGE_DURATION;
@@ -19293,7 +18784,7 @@ mod tests {
                     let context = fonts::test_context();
                     context.enable_accesskit();
                     context.set_pixels_per_point(density);
-                    let frame = |events| {
+                    let mut frame = |events| {
                         let mut actions = Vec::new();
                         let output = context.run_ui(
                             egui::RawInput {
@@ -19466,7 +18957,7 @@ mod tests {
                 context.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
                 app.media_duration = Some(Duration::from_secs(30));
                 let pos = egui::pos2(x, 284.0);
-                let frame = |events| {
+                let mut frame = |events| {
                     let mut actions = Vec::new();
                     let output = context.run_ui(
                         egui::RawInput {
@@ -21451,7 +20942,8 @@ mod tests {
                 assert_eq!(
                     tree.nodes
                         .iter()
-                        .any(|(_, node)| node.value() == Some(expected.as_str())),
+                        .any(|(_, node)| node.label().or_else(|| node.value())
+                            == Some(expected.as_str())),
                     !fullscreen,
                     "drag metrics do not reveal fullscreen status: {expected}"
                 );
@@ -21473,7 +20965,8 @@ mod tests {
                 }
                 assert!(
                     tree.nodes.iter().any(|(_, node)| node
-                        .value()
+                        .label()
+                        .or_else(|| node.value())
                         .is_some_and(|value| value.contains(&format!("focus.png · {expected}")))),
                     "released metrics follow the path"
                 );
@@ -21717,7 +21210,8 @@ mod tests {
                 assert!(
                     tree.nodes
                         .iter()
-                        .any(|(_, node)| node.value() == Some("Windowed status"))
+                        .any(|(_, node)| node.label().or_else(|| node.value())
+                            == Some("Windowed status"))
                 );
                 assert!(!app.fullscreen_controls_visible && app.edits.is_empty());
                 if kind == MediaKind::Image {
@@ -23091,7 +22585,7 @@ mod tests {
                     .expect("tree")
                     .nodes
                     .iter()
-                    .find(|(_, node)| node.label() == Some("All"))
+                    .find(|(_, node)| node.label() == Some("Search"))
                     .expect("Welcome action")
                     .0;
                 frame(
@@ -26879,35 +26373,41 @@ mod tests {
                     std::thread::sleep(Duration::from_millis(2));
                 }
                 let duration = media_time(app.playback_duration().expect("video duration"));
-                for state in [
-                    PlaybackState::Playing,
-                    PlaybackState::Paused,
-                    PlaybackState::Ended,
-                ] {
-                    for digit in 0..10 {
-                        app.state = state;
-                        let generation = app.generation;
-                        app.process_shortcut(digit.to_string().parse().expect("percentage key"));
-                        let expected = MediaTime::from_nanoseconds(
-                            (i128::from(duration.as_nanoseconds()) * digit / 10) as i64,
-                        );
-                        assert_eq!(
-                            app.current_position(),
-                            expected,
-                            "percentage {digit}, {state:?}"
-                        );
-                        assert_eq!(app.generation, generation.next());
-                        assert_eq!(
-                            app.state,
-                            if state == PlaybackState::Ended {
-                                PlaybackState::Paused
-                            } else {
-                                state
-                            }
-                        );
-                        assert!(!app.edits.contains_key(&tab));
+                for kind in [MediaKind::Video, MediaKind::Audio] {
+                    app.media_kind = Some(kind);
+                    for state in [
+                        PlaybackState::Playing,
+                        PlaybackState::Paused,
+                        PlaybackState::Ended,
+                    ] {
+                        for digit in 0..10 {
+                            app.state = state;
+                            let generation = app.generation;
+                            app.process_shortcut(
+                                digit.to_string().parse().expect("percentage key"),
+                            );
+                            let expected = MediaTime::from_nanoseconds(
+                                (i128::from(duration.as_nanoseconds()) * digit / 10) as i64,
+                            );
+                            assert_eq!(
+                                app.current_position(),
+                                expected,
+                                "percentage {digit}, {state:?}, {kind:?}"
+                            );
+                            assert_eq!(app.generation, generation.next());
+                            assert_eq!(
+                                app.state,
+                                if state == PlaybackState::Ended {
+                                    PlaybackState::Paused
+                                } else {
+                                    state
+                                }
+                            );
+                            assert!(!app.edits.contains_key(&tab));
+                        }
                     }
                 }
+                app.media_kind = Some(MediaKind::Video);
                 app.state = PlaybackState::Paused;
                 app.toggle_pause();
                 for kind in [MediaKind::Video, MediaKind::Audio] {

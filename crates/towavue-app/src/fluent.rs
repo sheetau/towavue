@@ -5,6 +5,9 @@ mod paths;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum Kind {
+    Search,
+    ChevronUp,
+    Dismiss,
     Keyboard,
     Play,
     Pause,
@@ -147,6 +150,9 @@ mod tests {
             Kind::Move,
             Kind::New,
             Kind::Forbidden,
+            Kind::Search,
+            Kind::ChevronUp,
+            Kind::Dismiss,
         ];
         for logical in [16.0, 32.0] {
             for density in [1.0, 1.25, 1.5, 2.0, 3.0] {
@@ -159,7 +165,19 @@ mod tests {
                             .iter()
                             .all(|p| p[0] == p[1] && p[1] == p[2] && p[2] == p[3])
                     );
-                    assert!(pixels.iter().any(|p| p[3] > 200));
+                    // One-point diagonal strokes can cover less than a full texel
+                    // at small sizes; retain the stronger bound for filled artwork.
+                    let minimum = if matches!(kinds[index], Kind::ChevronUp | Kind::Dismiss) {
+                        128
+                    } else {
+                        200
+                    };
+                    let coverage = pixels.iter().map(|p| p[3]).max().expect("pixels");
+                    assert!(
+                        coverage > minimum,
+                        "{:?} at {size}px: alpha {coverage}",
+                        kinds[index]
+                    );
                     // Some upstream icons intentionally reach the canvas edge.
                     // Check their geometry instead of imposing Lucide's inset.
                     for path in paths::paths(kinds[index]) {

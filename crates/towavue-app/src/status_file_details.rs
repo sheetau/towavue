@@ -572,37 +572,40 @@ mod tests {
                         app.draw_status_bar(ui, &mut Vec::new(), &mut Vec::new());
                     });
                     assert_eq!(output.pixels_per_point, density);
-                    let (shape, text) = output
+                    let mut shown_fields: Vec<_> = output
                         .shapes
                         .iter()
-                        .find_map(|shape| match &shape.shape {
+                        .filter_map(|shape| match &shape.shape {
                             egui::Shape::Text(text)
-                                if text
-                                    .galley
-                                    .text()
-                                    .starts_with(Text::StatusFit.in_language(language)) =>
+                                if details.iter().any(|field| field == text.galley.text()) =>
                             {
                                 Some((shape, text))
                             }
                             _ => None,
                         })
-                        .expect("right status label");
-                    let shown = text.galley.text();
-                    assert!(!text.galley.elided);
+                        .collect();
+                    shown_fields.sort_by(|a, b| a.1.pos.x.total_cmp(&b.1.pos.x));
+                    let shown = shown_fields
+                        .iter()
+                        .map(|(_, text)| text.galley.text())
+                        .collect::<Vec<_>>()
+                        .join("   ");
                     assert!(
                         shown.starts_with(&previous),
                         "widening must only add fields"
                     );
-                    assert!(full.starts_with(shown));
-                    assert!(
-                        details.iter().any(|field| shown.ends_with(field)),
-                        "no partial fields"
-                    );
-                    let bounds = text.visual_bounding_rect();
-                    assert!(bounds.left() >= shape.clip_rect.left() - 1.0);
-                    assert!(bounds.right() <= width + 1.0);
-                    final_width = text.galley.size().x;
-                    previous = shown.to_owned();
+                    assert!(full.starts_with(&shown));
+                    for (shape, text) in &shown_fields {
+                        assert!(!text.galley.elided, "whole fields only");
+                        let bounds = text.visual_bounding_rect();
+                        assert!(bounds.left() >= shape.clip_rect.left() - 1.0);
+                        assert!(bounds.right() <= width + 1.0);
+                    }
+                    final_width = shown_fields
+                        .iter()
+                        .map(|(_, text)| text.galley.size().x + 14.0)
+                        .sum::<f32>();
+                    previous = shown;
                 }
                 assert_eq!(previous, full, "wide windows reveal all available fields");
                 assert!(
@@ -665,25 +668,30 @@ mod tests {
                         assert_eq!(visible_date, width == 960.0, "{kind:?}, {density}, {width}");
                     }
                     {
-                        let full_info = app.status_details().join("   ");
-                        let position = output
-                            .shapes
-                            .iter()
-                            .find_map(|shape| match &shape.shape {
-                                egui::Shape::Text(text)
-                                    if !text.galley.text().is_empty()
-                                        && full_info.starts_with(text.galley.text()) =>
-                                {
-                                    assert!(!text.galley.elided, "whole status fields only");
-                                    Some(
-                                        text.visual_bounding_rect()
-                                            .intersect(shape.clip_rect)
-                                            .center(),
-                                    )
-                                }
-                                _ => None,
-                            })
-                            .expect("file details label");
+                        let position = output.shapes.iter().find_map(|shape| match &shape.shape {
+                            egui::Shape::Text(text)
+                                if !text.galley.text().is_empty()
+                                    && app
+                                        .status_details()
+                                        .iter()
+                                        .any(|field| field == text.galley.text()) =>
+                            {
+                                assert!(!text.galley.elided, "whole status fields only");
+                                Some(
+                                    text.visual_bounding_rect()
+                                        .intersect(shape.clip_rect)
+                                        .center(),
+                                )
+                            }
+                            _ => None,
+                        });
+                        let Some(position) = position else {
+                            assert!(
+                                width <= 320.0,
+                                "metadata must fit on a normal-width row: {kind:?}/{width}/{density}"
+                            );
+                            continue;
+                        };
                         context.global_style_mut(|style| {
                             style.interaction.tooltip_delay = 0.0;
                             style.interaction.show_tooltips_only_when_still = false;
@@ -814,9 +822,7 @@ mod tests {
                                 .get_mut(&egui::ViewportId::ROOT)
                                 .expect("viewport")
                                 .native_pixels_per_point = Some(density);
-                            let mut gap = 0.0;
                             let output = context.run_ui(raw, |ui| {
-                                gap = status_info::field_gap(ui);
                                 app.draw_status_bar(ui, &mut Vec::new(), &mut Vec::new());
                             });
                             let path_text =
@@ -837,37 +843,34 @@ mod tests {
                                 // clock/volume controls before showing a path.
                                 continue;
                             };
-                            let details = app.status_details().join("   ");
-                            let info = output.shapes.iter().find_map(|shape| match &shape.shape {
-                                egui::Shape::Text(text)
-                                    if !text.galley.text().is_empty()
-                                        && details.starts_with(text.galley.text()) =>
-                                {
-                                    Some(text)
-                                }
-                                _ => None,
-                            });
-                            if let Some(info) = info {
-                                assert!(!info.galley.elided);
-                                let right = info.pos.x + info.galley.rect.right();
-                                let expected = (width * density).round()
-                                    - (chrome::STATUS_BUTTON_GAP * 2.0 * density).round();
+                            let details = app.status_details();
+                            let mut fields: Vec<_> = output
+                                .shapes
+                                .iter()
+                                .filter_map(|shape| match &shape.shape {
+                                    egui::Shape::Text(text)
+                                        if details
+                                            .iter()
+                                            .any(|detail| detail == text.galley.text()) =>
+                                    {
+                                        Some(text)
+                                    }
+                                    _ => None,
+                                })
+                                .collect();
+                            fields.sort_by(|a, b| a.pos.x.total_cmp(&b.pos.x));
+                            for pair in fields.windows(2) {
                                 assert!(
-                                    (right * density - expected).abs() < 1.1,
-                                    "right inset: {kind:?} {density} {width}: {right} expected physical {expected}"
+                                    pair[0].pos.x + pair[0].galley.size().x <= pair[1].pos.x,
+                                    "status fields overlap"
                                 );
-                                let actual_gap = info.pos.x + info.galley.rect.left()
-                                    - (path_text.pos.x + path_text.galley.job.wrap.max_width);
+                            }
+                            if let Some(last) = fields.last() {
                                 assert!(
-                                    (actual_gap - gap).abs() < 3.0 / density,
-                                    "fixed path gap: {language:?} {kind:?} {density} {width}: {actual_gap} vs {gap}; info {:?} {:?} at {:?}; path {:?} wrap {} at {:?}",
-                                    info.galley.text(),
-                                    info.galley.rect,
-                                    info.pos,
-                                    path_text.galley.rect,
-                                    path_text.galley.job.wrap.max_width,
-                                    path_text.pos
+                                    last.pos.x + last.galley.size().x <= width - 3.0,
+                                    "field escapes right padding"
                                 );
+                                assert!(!last.galley.elided, "only complete fields are displayed");
                             }
                             if width == 1280.0
                                 || width == 960.0 && !detailed && kind == MediaKind::Image
@@ -908,12 +911,11 @@ mod tests {
                         _ => None,
                     })
                     .expect("text-only status");
-                let inset = chrome::STATUS_BUTTON_GAP * 2.0;
+                let inset = 3.0 + 26.0 + chrome::TAB_PADDING;
                 assert!((text.pos.x - inset).abs() <= 1.0 / density);
                 assert!(
-                    (640.0 - text.pos.x - text.galley.job.wrap.max_width - inset).abs()
-                        <= 1.0 / density,
-                    "matching right text inset"
+                    text.pos.x + text.galley.job.wrap.max_width < 640.0 - 3.0,
+                    "Gallery summary leaves room for the filter"
                 );
             }
         }

@@ -138,13 +138,7 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
         }
     }
 
-    pub(super) fn draw_gallery(
-        &mut self,
-        ui: &mut egui::Ui,
-        enabled: bool,
-        actions: &mut Vec<UiAction>,
-    ) {
-        let policy = self.gallery_preparation_policy(ui.ctx());
+    fn prepare_gallery_listing(&mut self) {
         let listing = &mut self.gallery_listing;
         if !listing.source_valid {
             listing.counts.gallery_dates(&self.recent_dates);
@@ -158,6 +152,48 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
             listing.source_valid = true;
             listing.filter_valid = false;
         }
+    }
+
+    pub(super) fn draw_gallery_status(&mut self, ui: &mut egui::Ui) {
+        self.prepare_gallery_listing();
+        let language = crate::localization::language(ui.ctx());
+        let notice = self.status_notice();
+        let date = self
+            .gallery_listing
+            .status_date(language)
+            .map(|date| {
+                self.gallery_listing
+                    .status_name()
+                    .map_or_else(|| date.clone(), |name| format!("{date} · {name}"))
+            })
+            .unwrap_or_default();
+        let counts = &mut self.gallery_listing.counts;
+        counts.update(&self.gallery_listing.available, &self.gallery_search);
+        crate::browser_controls::gallery_status(
+            ui,
+            egui::Id::new(("gallery-status-search", self.tabs.gallery())),
+            &counts.values,
+            &mut self.gallery_search,
+            &mut self.gallery_filter,
+            egui::RichText::new(notice.clone().unwrap_or(date))
+                .size(crate::chrome::TEXT_LG)
+                .color(if notice.is_some() {
+                    crate::chrome::FOREGROUND
+                } else {
+                    crate::chrome::MUTED
+                }),
+        );
+    }
+
+    pub(super) fn draw_gallery(
+        &mut self,
+        ui: &mut egui::Ui,
+        enabled: bool,
+        actions: &mut Vec<UiAction>,
+    ) {
+        let policy = self.gallery_preparation_policy(ui.ctx());
+        self.prepare_gallery_listing();
+        let listing = &mut self.gallery_listing;
         let Listing {
             available,
             counts,
@@ -178,7 +214,7 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
                 welcome::show(
                     ui,
                     counts,
-                    &mut self.gallery_search,
+                    &self.gallery_search,
                     &mut self.gallery_filter,
                     available,
                     enabled,
@@ -269,10 +305,7 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
                                 offset: if index == 0 {
                                     0.0
                                 } else {
-                                    ui.text_style_height(&egui::TextStyle::Body)
-                                        + 2.0 * crate::browser_controls::INSET
-                                        + crate::filmstrip::GALLERY_GAP
-                                        + grid.offset(index)
+                                    crate::filmstrip::GALLERY_GAP + grid.offset(index)
                                 },
                             })
                             .collect()

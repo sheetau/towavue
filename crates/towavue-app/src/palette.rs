@@ -132,6 +132,11 @@ impl CommandPalette {
         .then(|| self.search_query())
     }
 
+    pub fn open_commands(&mut self, query: &str) {
+        self.reset();
+        self.query = format!(">{query}");
+    }
+
     pub fn open_current(&mut self, folders: bool) {
         self.open_files(false);
         self.query.push(if folders { ':' } else { '@' });

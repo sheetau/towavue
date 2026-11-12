@@ -2,6 +2,57 @@ use super::*;
 
 type App = Application<fn(AppEvent)>;
 
+#[test]
+fn resize_separator_keeps_e0_and_default_width_in_each_state() {
+    let context = fonts::test_context();
+    context.global_style_mut(chrome::style);
+    let panel = egui::Id::new("separator-color");
+    let mut height = 96.0;
+    let mut top = egui::pos2(200.0, 204.0);
+    for state in 0..3 {
+        let events = match state {
+            1 => vec![egui::Event::PointerMoved(top)],
+            2 => vec![button(top, true)],
+            _ => vec![],
+        };
+        let output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(400.0, 320.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                let result = show_panel(ui, panel, &mut height, true, egui::Margin::ZERO, |_| {});
+                top = result.response.rect.center_top();
+            },
+        );
+        let stroke = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::LineSegment { points, stroke }
+                    if (points[1].x - points[0].x).abs() > 390.0 =>
+                {
+                    Some(*stroke)
+                }
+                _ => None,
+            })
+            .expect("panel separator");
+        assert_eq!(stroke.color, chrome::FOREGROUND);
+        let style = context.global_style();
+        let widgets = &style.visuals.widgets;
+        let expected = match state {
+            0 => widgets.noninteractive.bg_stroke,
+            1 => widgets.hovered.fg_stroke,
+            _ => widgets.active.fg_stroke,
+        };
+        assert_eq!(stroke.width, expected.width);
+    }
+}
+
 fn setup(kind: MediaKind, scale: f32) -> App {
     let mut app = Application::new(None, (|_| {}) as fn(AppEvent)).expect("app");
     let path = PathBuf::from(if kind == MediaKind::Audio {

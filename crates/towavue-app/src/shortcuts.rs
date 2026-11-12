@@ -3042,7 +3042,7 @@ mod percentage_tests {
     }
 
     #[test]
-    fn video_percentage_keys_are_contextual_and_preserve_custom_bindings_and_prefixes() {
+    fn playback_percentage_keys_are_contextual_and_preserve_custom_bindings_and_prefixes() {
         let defaults = defaults();
         for kind in [MediaKind::Image, MediaKind::Audio, MediaKind::Video] {
             let context = CommandContext {
@@ -3052,7 +3052,7 @@ mod percentage_tests {
             for digit in 0..10 {
                 let stroke = digit.to_string().parse().expect("digit");
                 let resolved = defaults.resolve(&[stroke], context);
-                if kind == MediaKind::Video {
+                if matches!(kind, MediaKind::Video | MediaKind::Audio) {
                     let ShortcutMatch::Command(command) = resolved else {
                         panic!("video digit {digit}")
                     };

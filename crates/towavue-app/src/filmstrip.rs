@@ -3059,7 +3059,7 @@ mod tests {
                     crate::welcome::show(
                         ui,
                         &mut crate::browser_controls::Counts::default(),
-                        &mut String::new(),
+                        "",
                         &mut None,
                         &paths,
                         enabled,

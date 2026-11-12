@@ -197,7 +197,10 @@ fn selection_zoom_keeps_the_full_image_and_clears_selection_in_the_input_frame()
                         .expect("tree")
                         .nodes
                         .iter()
-                        .any(|(_, node)| node.value().is_some_and(|text| text.contains(&expected))),
+                        .any(|(_, node)| node
+                            .label()
+                            .or_else(|| node.value())
+                            .is_some_and(|text| text.contains(&expected))),
                     "status follows edited dimensions: {expected}"
                 );
                 let start = selection_rect(before.calc_bounds(), selected).center();

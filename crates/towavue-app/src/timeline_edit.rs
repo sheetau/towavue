@@ -102,6 +102,7 @@ pub(super) fn show_panel<R>(
     let resizable = enabled && panel_resize_enabled(root, panel);
     root.visuals_mut().widgets.active.fg_stroke.color = chrome::FOREGROUND;
     root.visuals_mut().widgets.hovered.fg_stroke.color = chrome::FOREGROUND;
+    root.visuals_mut().widgets.noninteractive.bg_stroke.color = chrome::FOREGROUND;
     let anchor_id = panel.with("resize-anchor");
     let response = root.ctx().read_response(panel.with("__resize"));
     let live = resizable

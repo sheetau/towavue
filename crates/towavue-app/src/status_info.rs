@@ -12,10 +12,17 @@ enum Group {
     Modified,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum Action {
+    Command(CommandId),
+    Palette(&'static str),
+}
+
 #[derive(Default)]
 pub(super) struct StatusInfo {
     language: Language,
     pub fields: Vec<String>,
+    pub actions: Vec<Option<Action>>,
     field_groups: Vec<Group>,
     pub image_position: Option<String>,
     help: Vec<(Group, String)>,
@@ -24,8 +31,13 @@ pub(super) struct StatusInfo {
 impl StatusInfo {
     fn push(&mut self, group: Group, compact: impl Into<String>, help: impl Into<String>) {
         self.fields.push(compact.into());
+        self.actions.push(None);
         self.field_groups.push(group);
         self.help.push((group, help.into()));
+    }
+
+    fn action(&mut self, action: Action) {
+        *self.actions.last_mut().expect("status field") = Some(action);
     }
 
     pub fn folder_tooltip(&self) -> String {
@@ -111,6 +123,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 short,
                 formatted::status_reduction(language, &help, reduction),
             );
+            details.action(Action::Command(if self.image_view.zoom == ZoomMode::Fit {
+                CommandId::CoverWindow
+            } else {
+                CommandId::FitToWindow
+            }));
         }
         if image.is_some_and(|image| image.decoded.is_animated()) {
             details.push(
@@ -129,6 +146,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 &value,
                 formatted::status_speed(language, &value),
             );
+            details.action(Action::Palette("playback rate"));
         }
         if self
             .tabs
@@ -173,15 +191,24 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 formatted::status_pixels(language, &value),
             );
         }
+        if details.fields.len() > format_field
+            && matches!(self.media_kind, Some(MediaKind::Image | MediaKind::Video))
+        {
+            details.actions[format_field] = Some(Action::Palette("resize"));
+        }
         if dimensions.is_some() && details.fields.len() == format_field + 2 {
             let dimensions = details.fields.pop().expect("dimensions field");
             details.field_groups.pop();
+            details.actions.pop();
             details.fields[format_field].push(' ');
             details.fields[format_field].push_str(&dimensions);
         }
         if let Some(file) = file {
             let value = format_size(file.bytes);
             details.push(Group::File, &value, &value);
+            if self.media_kind == Some(MediaKind::Video) {
+                details.action(Action::Palette("export quality"));
+            }
         }
         if self.media_kind == Some(MediaKind::Video)
             && let Some(fps) = self
@@ -229,6 +256,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     Text::StatusItem.in_language(language)
                 };
                 details.push(Group::Folder, &value, format!("{kind} {value}"));
+                details.action(Action::Command(CommandId::ToggleFilmstrip));
                 if self.media_kind == Some(MediaKind::Image) && !self.animation_timeline_visible() {
                     details.image_position = Some(if self.reading_mode {
                         let range = self.reading_settings.spread(index, count);
@@ -264,6 +292,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 )
             };
             details.push(Group::Display, short, help);
+            details.action(Action::Command(CommandId::ToggleImageInterpolation));
         } else if self.session.is_some() {
             let edit = self.edit_state();
             if edit.trim_start.is_some() || edit.trim_end.is_some() {
@@ -285,7 +314,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         let mut fields: Vec<_> = std::mem::take(&mut details.field_groups)
             .into_iter()
-            .zip(std::mem::take(&mut details.fields))
+            .zip(
+                std::mem::take(&mut details.fields)
+                    .into_iter()
+                    .zip(std::mem::take(&mut details.actions)),
+            )
             .filter(|(group, _)| *group != Group::Folder || details.image_position.is_none())
             .collect();
         // Ordering also supplies the compact-width priority; tooltips retain all fields.
@@ -297,51 +330,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             Group::Folder => 4,
             Group::Modified => 5,
         });
-        details.fields = fields.into_iter().map(|(_, field)| field).collect();
+        (details.fields, details.actions) = fields.into_iter().map(|(_, field)| field).unzip();
         details
     }
-}
-
-/// Match the path separator to the spacing between complete status fields.
-pub(super) fn field_gap(ui: &egui::Ui) -> f32 {
-    ui.painter()
-        .layout_no_wrap(
-            "   ".into(),
-            egui::FontId::proportional(crate::chrome::TEXT_LG),
-            chrome::MUTED,
-        )
-        .size()
-        .x
-}
-
-/// Reuse the measured right-aligned galley so fitting and painting share identical metrics.
-pub(super) fn fitting_text(
-    ui: &egui::Ui,
-    details: &[String],
-    width: f32,
-) -> Option<std::sync::Arc<egui::Galley>> {
-    let mut text = String::new();
-    let mut fitted = None;
-    for detail in details {
-        let candidate = if text.is_empty() {
-            detail.clone()
-        } else {
-            format!("{text}   {detail}")
-        };
-        let mut job = egui::text::LayoutJob::simple_singleline(
-            candidate.clone(),
-            egui::FontId::proportional(crate::chrome::TEXT_LG),
-            chrome::MUTED,
-        );
-        job.halign = egui::Align::RIGHT;
-        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
-        if galley.size().x > width {
-            break;
-        }
-        fitted = Some(galley);
-        text = candidate;
-    }
-    fitted
 }
 
 fn frame_rate_text(fps: f64) -> String {

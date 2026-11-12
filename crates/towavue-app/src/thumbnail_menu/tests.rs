@@ -255,7 +255,7 @@ fn thumbnail_context_menus_keep_exact_target_in_language(language: crate::locali
                     ..Default::default()
                 },
                 |ui| match scope {
-                    Scope::Folder => unreachable!("breadcrumb-specific controls"),
+                    Scope::Folder | Scope::Status => unreachable!("breadcrumb-specific controls"),
                     Scope::Gallery => {
                         strip.show_recent(ui, &paths, 1, true, &mut actions);
                     }

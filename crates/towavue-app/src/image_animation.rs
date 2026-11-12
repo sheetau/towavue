@@ -312,16 +312,12 @@ where
         } else {
             label.clone()
         };
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(shown)
-                    .size(crate::chrome::TEXT_LG)
-                    .color(chrome::MUTED),
-            )
-            .truncate()
-            .show_tooltip_when_elided(false),
-        )
-        .help_text(label);
+        if crate::status_bar::item(ui, egui::RichText::new(shown).size(chrome::TEXT_LG), true)
+            .help_text(label)
+            .clicked()
+        {
+            actions.push(UiAction::Command(CommandId::ToggleTimeline));
+        }
     }
 
     pub(super) fn draw_animation_timeline(&mut self, root: &mut egui::Ui) {
@@ -729,7 +725,8 @@ mod tests {
                 .iter()
                 .all(|section| section.format.font_id
                     == egui::FontId::proportional(chrome::TEXT_LG)
-                    && section.format.color == chrome::MUTED)
+                    && (section.format.color == chrome::MUTED
+                        || section.format.color == egui::Color32::PLACEHOLDER))
         );
         let enabled = |id, context| {
             crate::command_definitions()

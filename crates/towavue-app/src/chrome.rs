@@ -73,7 +73,7 @@ pub use tokens::*;
 pub const TITLE_HEIGHT: f32 = 32.0;
 pub const STATUS_HEIGHT: f32 = 30.0;
 pub const STATUS_BUTTON_SIZE: f32 = ROW_HEIGHT;
-pub const STATUS_BUTTON_GAP: f32 = (STATUS_HEIGHT - STATUS_BUTTON_SIZE) * 0.5;
+pub const STATUS_BUTTON_GAP: f32 = ITEM_GAP;
 pub const TAB_CLOSE_WIDTH: f32 = 24.0;
 pub const INPUT_HEIGHT: f32 = CONTROL_HEIGHT;
 pub const INPUT_RADIUS: u8 = RADIUS_XS;

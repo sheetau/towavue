@@ -112,6 +112,7 @@ fn utility_status_text_has_double_the_media_button_leading_gap() {
         let context = fonts::test_context();
         context.set_pixels_per_point(density);
         context.global_style_mut(chrome::style);
+        context.enable_accesskit();
         for keyboard in [false, true] {
             if keyboard {
                 app.tabs.open_keyboard_settings();
@@ -134,6 +135,24 @@ fn utility_status_text_has_double_the_media_button_leading_gap() {
                 ));
             }
             let output = output.expect("frame");
+            if !keyboard {
+                let tree = output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("tree");
+                let rect = tree
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some("Search"))
+                    .expect("search")
+                    .1
+                    .bounds()
+                    .expect("bounds");
+                assert!((rect.x0 - 3.0).abs() <= 1.0 / f64::from(density));
+                assert!((rect.width() - 24.0).abs() <= 1.0 / f64::from(density));
+                continue;
+            }
             let text = output
                 .shapes
                 .iter()
@@ -151,7 +170,7 @@ fn utility_status_text_has_double_the_media_button_leading_gap() {
                 })
                 .expect("utility status label");
             assert!(
-                (text.pos.x - 2.0 * chrome::STATUS_BUTTON_GAP).abs() <= 1.0 / density,
+                (text.pos.x - (3.0 + chrome::TAB_PADDING)).abs() <= 1.0 / density,
                 "utility text left gap: {:?}",
                 text.pos
             );

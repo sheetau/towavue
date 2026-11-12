@@ -76,12 +76,12 @@ mod tests {
     }
 
     fn paint(
-        app: &Application<impl Fn(AppEvent) + Send + Sync + 'static>,
+        app: &mut Application<impl Fn(AppEvent) + Send + Sync + 'static>,
         width: f32,
         events: Vec<egui::Event>,
     ) -> (egui::FullOutput, Vec<UiAction>) {
         let mut actions = Vec::new();
-        let output = app.ui_context.as_ref().expect("context").run_ui(
+        let output = app.ui_context.clone().expect("context").run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -138,20 +138,20 @@ mod tests {
                 context.enable_accesskit();
                 app.ui_context = Some(context);
                 let shown = notice(&mut app, &target);
-                paint(&app, width, vec![]);
-                let (output, _) = paint(&app, width, vec![]);
+                paint(&mut app, width, vec![]);
+                let (output, _) = paint(&mut app, width, vec![]);
                 assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
                     egui::Shape::Text(text) if text.galley.text() == "Exported")));
                 assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
                     egui::Shape::Text(text) if text.galley.text().contains("long exported file name"))));
                 let (id, rect) = link(&output).expect("export link");
                 let pos = rect.center();
-                let (hover, _) = paint(&app, width, vec![egui::Event::PointerMoved(pos)]);
+                let (hover, _) = paint(&mut app, width, vec![egui::Event::PointerMoved(pos)]);
                 assert_eq!(
                     hover.platform_output.cursor_icon,
                     egui::CursorIcon::PointingHand
                 );
-                let (help, _) = paint(&app, width, vec![egui::Event::PointerMoved(pos)]);
+                let (help, _) = paint(&mut app, width, vec![egui::Event::PointerMoved(pos)]);
                 assert!(help.shapes.iter().any(|shape| matches!(&shape.shape,
                     egui::Shape::Text(text) if text.galley.text().contains(&target.display().to_string()))), "full path stays in hover help");
                 let button = |pressed| egui::Event::PointerButton {
@@ -160,8 +160,8 @@ mod tests {
                     button: egui::PointerButton::Primary,
                     modifiers: egui::Modifiers::NONE,
                 };
-                paint(&app, width, vec![button(true)]);
-                let (_, actions) = paint(&app, width, vec![button(false)]);
+                paint(&mut app, width, vec![button(true)]);
+                let (_, actions) = paint(&mut app, width, vec![button(false)]);
                 assert!(actions == vec![UiAction::RevealExport(shown)]);
                 let middle = |pressed| egui::Event::PointerButton {
                     pos,
@@ -169,19 +169,19 @@ mod tests {
                     button: egui::PointerButton::Middle,
                     modifiers: egui::Modifiers::NONE,
                 };
-                paint(&app, width, vec![middle(true)]);
-                let (_, actions) = paint(&app, width, vec![middle(false)]);
+                paint(&mut app, width, vec![middle(true)]);
+                let (_, actions) = paint(&mut app, width, vec![middle(false)]);
                 assert!(actions == vec![UiAction::OpenExport(shown)]);
                 let source = app.path.replace(target.clone());
-                paint(&app, width, vec![middle(true)]);
-                let (_, actions) = paint(&app, width, vec![middle(false)]);
+                paint(&mut app, width, vec![middle(true)]);
+                let (_, actions) = paint(&mut app, width, vec![middle(false)]);
                 assert!(
                     actions.is_empty(),
                     "current document never opens a duplicate"
                 );
                 app.path = source;
                 let (_, actions) = paint(
-                    &app,
+                    &mut app,
                     width,
                     vec![egui::Event::AccessKitActionRequest(
                         egui::accesskit::ActionRequest {
@@ -265,7 +265,7 @@ mod tests {
         app.set_status(message);
         assert!(app.export_notice.is_none());
         app.handle_ui_action(UiAction::RevealExport(stale));
-        assert!(link(&paint(&app, 640.0, vec![]).0).is_none());
+        assert!(link(&paint(&mut app, 640.0, vec![]).0).is_none());
         for blocked in (0..4).filter(|&blocked| blocked != 2) {
             let shown = notice(&mut app, &target);
             match blocked {
@@ -279,7 +279,7 @@ mod tests {
                 _ => app.export_error = Some("fixture failure".into()),
             }
             assert!(app.export_notice_target(shown).is_none());
-            assert!(link(&paint(&app, 640.0, vec![]).0).is_none());
+            assert!(link(&paint(&mut app, 640.0, vec![]).0).is_none());
             let count = app.tabs.len();
             app.handle_ui_action(UiAction::RevealExport(shown));
             app.handle_ui_action(UiAction::OpenExport(shown));

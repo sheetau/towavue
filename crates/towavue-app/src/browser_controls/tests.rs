@@ -34,7 +34,7 @@ fn key(key: egui::Key) -> egui::Event {
 }
 
 #[test]
-fn search_opens_with_keyboard_keeps_nonempty_blur_and_collapses_on_escape_or_empty_blur() {
+fn search_opens_with_keyboard_and_restores_status_only_on_explicit_close() {
     for density in [1.0, 1.25, 2.0] {
         let context = crate::fonts::test_context();
         context.global_style_mut(crate::chrome::style);
@@ -64,28 +64,11 @@ fn search_opens_with_keyboard_keeps_nonempty_blur_and_collapses_on_escape_or_emp
             )
         };
         let assert_border = |output: &egui::FullOutput| {
-            let border = output
-                .shapes
-                .iter()
-                .find_map(|shape| match &shape.shape {
-                    egui::Shape::Rect(border)
-                        if border.fill == crate::chrome::FOREGROUND
-                            && border.rect.width() > 200.0 =>
-                    {
-                        Some(border.rect)
-                    }
-                    _ => None,
-                })
-                .expect("white input bottom border, including after blur");
-            assert!((border.height() * density - 1.0).abs() < 0.001);
-            assert!(
-                (border.bottom() - (23.0 + crate::chrome::INPUT_HEIGHT * 0.5)).abs()
-                    <= 0.5 / density + 0.001
-            );
+            assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(border) if border.fill==crate::chrome::FOREGROUND && border.rect.width()>100.0)),"search is borderless");
         };
         frame(vec![]);
-        context.memory_mut(|memory| memory.request_focus(id.with("button")));
-        frame(vec![key(egui::Key::Enter)]);
+        request_search_focus(&context);
+        frame(vec![]);
         assert_border(&frame(vec![]));
         assert!(context.memory(|memory| memory.has_focus(id)));
         frame(vec![egui::Event::Text("日本語 photo".into())]);
@@ -120,28 +103,27 @@ fn search_opens_with_keyboard_keeps_nonempty_blur_and_collapses_on_escape_or_emp
         frame(vec![key(egui::Key::Escape)]);
         assert!(query.borrow().is_empty());
         assert!(!context.memory(|memory| memory.has_focus(id)));
-        let output = frame(vec![]);
+        frame(vec![]);
         assert!(
-            output
-                .shapes
-                .iter()
-                .any(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == "Search"))
+            !context
+                .data(|data| data.get_temp::<bool>(id.with("editing")))
+                .unwrap_or(false)
         );
-        context.memory_mut(|memory| memory.request_focus(id.with("button")));
-        frame(vec![key(egui::Key::Enter)]);
+        request_search_focus(&context);
+        frame(vec![]);
         context.memory_mut(|memory| memory.surrender_focus(id));
-        let output = frame(vec![]);
+        frame(vec![]);
         assert!(
-            output
-                .shapes
-                .iter()
-                .any(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == "Search"))
+            context
+                .data(|data| data.get_temp::<bool>(id.with("editing")))
+                .unwrap_or(false),
+            "explicit close restores status content"
         );
     }
 }
 
 #[test]
-fn filter_labels_share_one_row_with_superscripts_and_omit_absent_kinds() {
+fn filter_labels_and_counts_share_the_baseline_and_omit_absent_kinds() {
     for density in [1.0, 1.25, 2.0] {
         let context = crate::fonts::test_context();
         context.global_style_mut(crate::chrome::style);
@@ -169,17 +151,23 @@ fn filter_labels_share_one_row_with_superscripts_and_omit_absent_kinds() {
                 })
                 .expect("label")
         };
-        let right = text("All").pos.x + text("All").galley.size().x;
-        for label in ["Image", "Video"] {
+        let right = text("All 123").pos.x + text("All 123").galley.size().x;
+        for label in ["Image 100", "Video 23"] {
             let label = text(label);
-            assert!((label.pos.y - text("All").pos.y).abs() <= 1.0 / density);
+            assert!((label.pos.y - text("All 123").pos.y).abs() <= 1.0 / density);
             assert!(label.pos.x > right);
         }
-        let count = text("123");
-        assert!(count.pos.x > right && count.pos.y < text("All").pos.y);
+        let all = text("All 123");
+        assert_eq!(
+            all.galley.job.sections[0].format.color,
+            crate::chrome::FOREGROUND
+        );
+        assert_eq!(
+            all.galley.job.sections[1].format.color,
+            crate::chrome::FAINT
+        );
         assert!(
-            count
-                .galley
+            all.galley
                 .job
                 .sections
                 .iter()

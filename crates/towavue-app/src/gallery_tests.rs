@@ -408,7 +408,11 @@ fn gallery_activation_refreshes_missing_cards_but_preserves_history_and_loaded_t
             .y1;
         tree.nodes
             .iter()
-            .filter(|(_, node)| node.bounds().is_some_and(|bounds| bounds.y0 >= bottom))
+            .filter(|(_, node)| {
+                node.bounds().is_some_and(|bounds| {
+                    bounds.y0 >= chrome::TITLE_HEIGHT as f64 && bounds.y1 < bottom
+                })
+            })
             .filter_map(|(_, node)| node.label().map(str::to_owned))
             .collect::<Vec<_>>()
     };
@@ -525,9 +529,9 @@ fn gallery_type_filter_combines_search_disables_absent_kinds_and_preserves_tab_s
             tree.nodes.iter().any(|(_, node)| {
                 node.label() == Some(label)
                     && (MediaKind::from_path(Path::new(label)).is_none()
-                        || node
-                            .bounds()
-                            .is_some_and(|bounds| bounds.y0 >= header_bottom))
+                        || node.bounds().is_some_and(|bounds| {
+                            bounds.y0 >= chrome::TITLE_HEIGHT as f64 && bounds.y1 < header_bottom
+                        }))
             })
         };
         for _ in 0..3 {

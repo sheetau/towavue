@@ -74,6 +74,10 @@ fn media_reference_layouts_reach_the_gpu() {
                     "image-files",
                     "image-options",
                     "image-languages",
+                    "image-filmstrip",
+                    "image-filmstrip-search",
+                    "image-gallery",
+                    "image-gallery-search",
                     "image-filmstrip-menu",
                     "image-gallery-menu",
                     "image-modal-resize",
@@ -98,7 +102,10 @@ fn media_reference_layouts_reach_the_gpu() {
                         scene,
                         "image-palette" | "image-palette-search" | "image-files" | "image-options"
                     );
-                    if menu_scene {
+                    if menu_scene
+                        || scene.starts_with("image-filmstrip")
+                        || scene.starts_with("image-gallery")
+                    {
                         context.enable_accesskit();
                     }
                     let mut app = fixture(&self.root, &context, scene);
@@ -112,9 +119,9 @@ fn media_reference_layouts_reach_the_gpu() {
                             },
                         );
                     }
-                    if scene == "image-filmstrip-menu" {
+                    if scene.starts_with("image-filmstrip") {
                         app.filmstrip_open = true;
-                    } else if scene == "image-gallery-menu" {
+                    } else if scene.starts_with("image-gallery") {
                         app.recent_paths = app
                             .folder_snapshot
                             .as_ref()
@@ -125,6 +132,9 @@ fn media_reference_layouts_reach_the_gpu() {
                             .collect();
                         let gallery = app.tabs.gallery().expect("Gallery");
                         app.activate_tab(gallery);
+                    }
+                    if matches!(scene, "image-filmstrip-search" | "image-gallery-search") {
+                        browser_controls::request_search_focus(&context);
                     }
                     match scene {
                         "image-palette" => app.dispatch(CommandId::ToggleCommandPalette),
@@ -411,6 +421,21 @@ fn media_reference_layouts_reach_the_gpu() {
                                 > 200,
                             "thumbnail menu text reaches the GPU"
                         );
+                    } else if scene.starts_with("image-filmstrip")
+                        || scene.starts_with("image-gallery")
+                    {
+                        let row_top = (678.0 * density) as usize;
+                        let row = pixels[(row_top * width as usize * 4)..].as_chunks::<4>().0;
+                        assert!(
+                            row.iter().filter(|p| p[0] > 64).count() > 20,
+                            "browser status controls reach GPU: {scene}/{density}"
+                        );
+                        if scene.ends_with("-search") {
+                            assert!(
+                                context.text_edit_focused(),
+                                "browser search receives focus: {scene}"
+                            );
+                        }
                     } else if scene.starts_with("image") {
                         assert_eq!(
                             at(614.0, 354.0),
@@ -500,7 +525,7 @@ fn media_reference_layouts_reach_the_gpu() {
             }
             self.complete = true;
             eprintln!(
-                "PASS reference layouts: image/deleted/languages/reading/export status/modals/thumbnail menus, compact/editing audio and compact/editing video at 100/125/200%; full-client GPU readbacks including palettes, zoomed timeline and a day-long selection at maximum zoom. Generated state with native paused decoding; no native-caption or physical-input evidence."
+                "PASS reference layouts: image/deleted/languages/reading/export status/modals/thumbnail menus, compact/editing audio and compact/editing video at 100/125/200%; full-client GPU readbacks including Gallery/Filmstrip status and search, palettes, zoomed timeline and a day-long selection at maximum zoom. Generated state with native paused decoding; no native-caption or physical-input evidence."
             );
             event_loop.exit();
         }

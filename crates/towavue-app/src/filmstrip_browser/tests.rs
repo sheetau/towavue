@@ -603,7 +603,6 @@ fn blocked_browser_keeps_control_colors_and_popups_cover_every_strip_surface() {
                     },
                     |_| {
                         browser.show(&context, screen, None, enabled);
-                        browser.show_filters(&context, screen, enabled);
                     },
                 );
             }
@@ -656,7 +655,7 @@ fn blocked_browser_keeps_control_colors_and_popups_cover_every_strip_surface() {
                         })
                         .expect("popup");
                     browser.show(&context, screen, None, true);
-                    browser.show_filters(&context, screen, true);
+
                     for point in [egui::pos2(200.0, 30.0), egui::pos2(500.0, 370.0)] {
                         if context.cumulative_frame_nr() > 9 {
                             assert_eq!(context.layer_id_at(point), Some(popup.response.layer_id));
@@ -777,7 +776,7 @@ fn browser_middle_clicks_crumbs_and_cascade_rows_and_history_buttons_have_a_gap(
         egui::CursorIcon::PointingHand
     );
     let first = node(&output, "C:");
-    assert!((first.left() - forward.right() - 18.0).abs() < 0.01);
+    assert!((first.left() - forward.right() - 35.0).abs() < 0.01);
     let activate = |browser: &mut Browser, pos, button| {
         let mut action = None;
         for pressed in [true, false] {
@@ -915,7 +914,7 @@ fn browser_filters_use_bottom_insets_and_one_row_at_every_height() {
             let all = node(&output, "All");
             let image = node(&output, "Image");
             let audio = node(&output, "Audio");
-            assert!((audio.bottom() - (size.y - 18.0)).abs() <= 1.0 / density);
+            assert!((audio.bottom() - (size.y - 3.0)).abs() <= 1.0 / density);
             assert!((all.top() - audio.top()).abs() < 0.01);
             assert!(all.right() < image.left() && all.top() > 190.0);
             let right = output
@@ -923,14 +922,15 @@ fn browser_filters_use_bottom_insets_and_one_row_at_every_height() {
                 .iter()
                 .filter_map(|shape| match &shape.shape {
                     egui::Shape::Text(text)
-                        if ["124", "100", "23", "1"].contains(&text.galley.text()) =>
+                        if ["All 124", "Image 100", "Video 23", "Audio 1"]
+                            .contains(&text.galley.text()) =>
                     {
                         Some(text.pos.x + text.galley.size().x)
                     }
                     _ => None,
                 })
                 .fold(0.0, f32::max);
-            assert!((right - (size.x - 18.0)).abs() <= 1.0 / density);
+            assert!((right - (size.x - 10.0)).abs() <= 1.0 / density);
         }
     }
 }
@@ -955,22 +955,30 @@ fn browser_chevrons_center_the_visible_glyph_inside_the_unchanged_hitbox() {
                 click(&context, &mut browser, size, hitbox.center());
                 output = frame(&context, &mut browser, size, vec![]).0;
             }
-            let glyph = if open { "\u{eab4}" } else { "\u{eab6}" };
+            let icon = context
+                .data(|data| {
+                    data.get_temp::<(u32, egui::TextureHandle)>(egui::Id::new((
+                        "fluent-icon",
+                        crate::fluent::Kind::ChevronUp,
+                    )))
+                })
+                .expect("up chevron texture")
+                .1;
             let bounds = output
                 .shapes
                 .iter()
                 .find_map(|shape| match &shape.shape {
-                    egui::Shape::Text(text)
-                        if text.galley.text() == glyph
-                            && hitbox.contains(text.visual_bounding_rect().center()) =>
+                    egui::Shape::Mesh(mesh)
+                        if mesh.texture_id == icon.id()
+                            && hitbox.contains(mesh.calc_bounds().center()) =>
                     {
-                        Some(text.visual_bounding_rect())
+                        Some(mesh.calc_bounds())
                     }
                     _ => None,
                 })
-                .expect("breadcrumb glyph");
-            assert!(bounds.center().distance(hitbox.center()) <= 0.5 / density);
-            assert!((hitbox.height() - node(&output, "Parent").height()).abs() < 0.01);
+                .expect("Fluent up chevron");
+            assert!(bounds.center().distance(hitbox.center()) <= 0.75 / density);
+            assert!((hitbox.height() - 16.0).abs() < 0.01);
         }
     }
 }
@@ -1014,7 +1022,6 @@ fn action_frame(
         target = browser
             .show(ui.ctx(), ui.ctx().content_rect(), None, true)
             .or(target.take());
-        browser.show_filters(ui.ctx(), ui.ctx().content_rect(), true);
     });
     (output, target)
 }
@@ -1190,7 +1197,7 @@ fn browser_long_child_name_truncates_without_raising_or_separating_the_cascade()
         output = frame(&context, &mut browser, size, vec![]).0;
     }
     let child = node(&output, &crate::folder_navigation::folder_name(&long));
-    assert!(child.top() >= opener.bottom());
+    assert!(child.bottom() <= opener.top(), "status popup opens upward");
     assert!(
         (child.top() - arrow.top()).abs() < 1.0,
         "one-row child stays row-aligned"
@@ -1459,13 +1466,20 @@ fn browser_menus_expand_after_loading_align_labels_and_retain_address_input() {
             .shapes
             .iter()
             .find_map(|shape| match &shape.shape {
-                egui::Shape::Text(text) if text.galley.text() == label => Some(text),
+                egui::Shape::Text(text) if text.galley.text().starts_with(&format!("{label} ")) => {
+                    Some(text)
+                }
                 _ => None,
             })
             .expect("filter text");
-        assert!(text.galley.job.sections.iter().all(|section| {
-            text.override_text_color.unwrap_or(section.format.color) == chrome::FOREGROUND
-        }));
+        assert_eq!(
+            text.galley.job.sections[0].format.color,
+            if label == "All" {
+                chrome::FOREGROUND
+            } else {
+                chrome::MUTED
+            }
+        );
     }
     assert_eq!(
         click(&context, &mut browser, size, current.center())
@@ -1552,7 +1566,7 @@ fn browser_header_has_only_search_input_and_preserves_breadcrumbs_on_blank_click
             }
             let search = node(&output, "Search");
             assert!(search.width() <= 250.0);
-            assert!(search.width() > 32.0);
+            assert_eq!(search.width(), 24.0);
             let inputs = output
                 .platform_output
                 .accesskit_update
@@ -1563,8 +1577,8 @@ fn browser_header_has_only_search_input_and_preserves_breadcrumbs_on_blank_click
                 .filter(|(_, node)| node.role() == egui::accesskit::Role::TextInput)
                 .count();
             assert_eq!(inputs, 0, "the editor is hidden until Search is activated");
-            assert!(node(&output, "Pictures").left() < search.left());
-            let blank = egui::pos2(search.left() - 6.0, search.center().y);
+            assert!(node(&output, "Pictures").left() > search.right());
+            let blank = egui::pos2(search.left() - 1.0, search.center().y);
             assert!(click(&context, &mut browser, size, blank).1.is_none());
             assert!(
                 frame(
@@ -1810,6 +1824,30 @@ fn browser_header_reaches_gpu_at_supported_densities() {
                     }));
                     browser.counts.values = [120, 80, 30, 10];
                     for mode in 0..8 {
+                        let previous = frame(&context, &mut browser, size, vec![]).0;
+                        let close = previous
+                            .platform_output
+                            .accesskit_update
+                            .as_ref()
+                            .expect("tree")
+                            .nodes
+                            .iter()
+                            .find(|(_, node)| node.label() == Some("Cancel"))
+                            .and_then(|(_, node)| node.bounds())
+                            .map(|b| {
+                                egui::pos2(
+                                    ((b.x0 + b.x1) * 0.5) as f32,
+                                    ((b.y0 + b.y1) * 0.5) as f32,
+                                )
+                            });
+                        renderer
+                            .render_ui(&context, previous)
+                            .expect("search close textures");
+                        if let Some(pos) = close {
+                            let closed = click(&context, &mut browser, size, pos).0;
+                            renderer.render_ui(&context, closed).expect("closed search");
+                        }
+
                         browser.navigation = [true, mode > 0];
                         if mode == 5 {
                             browser.cache.clear();
@@ -1911,26 +1949,11 @@ fn browser_header_reaches_gpu_at_supported_densities() {
                             .0;
                             assert_eq!(output.pixels_per_point, density);
                             assert_eq!(context.zoom_factor(), 1.0);
-                            let border = if mode == 1 || mode == 2 {
-                                Some(
-                                    output
-                                        .shapes
-                                        .iter()
-                                        .find_map(|shape| match &shape.shape {
-                                            egui::Shape::Rect(shape)
-                                                if shape.fill == chrome::FOREGROUND
-                                                    && shape.rect.width() >= 90.0
-                                                    && shape.rect.height() <= 1.01 =>
-                                            {
-                                                Some(shape.rect)
-                                            }
-                                            _ => None,
-                                        })
-                                        .expect("input bottom border"),
-                                )
-                            } else {
-                                None
-                            };
+                            if mode == 1 || mode == 2 {
+                                assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+                                    egui::Shape::Rect(shape) if shape.fill==chrome::FOREGROUND && shape.rect.width()>=90.0 && shape.rect.height()<=1.01)),
+                                    "status search is borderless");
+                            }
                             renderer.clear([0.18, 0.25, 0.32, 1.0]).expect("background");
                             renderer.render_ui(&context, output).expect("UI");
                             if pass == 4 {
@@ -1943,26 +1966,6 @@ fn browser_header_reaches_gpu_at_supported_densities() {
                                 let pixels =
                                     renderer.verification_surface_rgba().expect("readback");
                                 assert_eq!(pixels.len(), (pixels_w * pixels_h * 4) as usize);
-                                if let Some(border) = border {
-                                    let x = (border.center().x * density) as usize;
-                                    let y = (border.center().y * density) as usize;
-                                    let at = |y: usize| {
-                                        let offset = (y * pixels_w as usize + x) * 4;
-                                        &pixels[offset..offset + 4]
-                                    };
-                                    assert_eq!(
-                                        at(y),
-                                        &chrome::FOREGROUND.to_array(),
-                                        "foreground input border at {density}x"
-                                    );
-                                    for adjacent in [y - 1, y + 1] {
-                                        assert_ne!(
-                                            at(adjacent),
-                                            &chrome::FOREGROUND.to_array(),
-                                            "one physical row"
-                                        );
-                                    }
-                                }
                                 if let Some(directory) =
                                     std::env::var_os("TOWAVUE_REFERENCE_RENDER_DIR")
                                 {
@@ -2033,7 +2036,7 @@ fn browser_search_retains_media_focus_and_filtered_tab_traversal_uses_paths() {
                 events,
                 ..Default::default()
             },
-            |ui| app.draw_filmstrip(ui.ctx(), ui.ctx().content_rect(), &mut actions),
+            |ui| app.draw_filmstrip(ui.ctx(), ui.ctx().content_rect(), None, &mut actions),
         );
         assert!(actions.is_empty());
         output
@@ -2042,9 +2045,28 @@ fn browser_search_retains_media_focus_and_filtered_tab_traversal_uses_paths() {
     for _ in 0..4 {
         output = draw(&mut app, vec![]);
     }
+    let card = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("tree")
+        .nodes
+        .iter()
+        .find(|(_, node)| {
+            node.label() == Some("z10.bmp")
+                && node
+                    .bounds()
+                    .is_some_and(|b| b.y1 < f64::from(size.y - crate::chrome::STATUS_HEIGHT))
+        })
+        .expect("media card, excluding the status filename")
+        .1
+        .bounds()
+        .expect("bounds");
     assert!(
-        (node(&output, "z10.bmp").center().y - size.y * 0.5).abs() < 1.0,
-        "header must not move the strip below the media center"
+        ((card.y0 + card.y1) * 0.5 - f64::from((size.y - crate::chrome::STATUS_HEIGHT) * 0.5))
+            .abs()
+            < 1.0,
+        "strip stays centered in its media viewport: {card:?}"
     );
     let dim = output
         .shapes
@@ -2059,7 +2081,7 @@ fn browser_search_retains_media_focus_and_filtered_tab_traversal_uses_paths() {
         .iter()
         .position(|shape| {
             matches!(&shape.shape,
-        egui::Shape::Text(text) if text.galley.text() == "Search")
+        egui::Shape::Mesh(mesh) if mesh.calc_bounds().intersects(node(&output, "Search")))
         })
         .expect("header text");
     assert!(

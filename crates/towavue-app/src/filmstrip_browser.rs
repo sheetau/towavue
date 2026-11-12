@@ -20,7 +20,7 @@ pub(super) struct View {
     search_focused: bool,
 }
 
-pub(super) const HEADER_HEIGHT: f32 = chrome::INPUT_HEIGHT + 36.0;
+pub(super) const HEADER_HEIGHT: f32 = chrome::STATUS_HEIGHT;
 type SourceKey = (PathBuf, u64, SystemTime, usize);
 
 fn menu_message(ui: &mut Ui, label: &str) {
@@ -55,6 +55,7 @@ pub(super) enum Action {
 pub(super) struct Browser {
     pub owner: Option<crate::thumbnail_menu::Owner>,
     pub navigation: [bool; 2],
+    pub current_path: Option<PathBuf>,
     tab: Option<towavue_core::TabId>,
     views: std::collections::BTreeMap<towavue_core::TabId, View>,
     search_focused: bool,
@@ -217,7 +218,10 @@ impl Browser {
     ) -> Option<Action> {
         let mut target = None;
         let header = Rect::from_min_size(
-            screen.min,
+            egui::pos2(
+                screen.left(),
+                (screen.bottom() - HEADER_HEIGHT).max(screen.top()),
+            ),
             egui::vec2(screen.width(), HEADER_HEIGHT.min(screen.height())),
         );
         egui::Area::new("filmstrip-browser".into())
@@ -246,92 +250,61 @@ impl Browser {
                     let prepare = self.background_ready(ui);
                     self.listing(ui, &self.folder.clone(), prepare);
                 }
-                let content = screen.shrink2(egui::vec2(crate::browser_controls::INSET, 0.0));
-                let navigation_width = 2.0 * chrome::SEARCH_BUTTON_SIZE + 18.0;
-                let total = (content.width() - navigation_width).max(1.0);
-                let gap = 16.0_f32.min(total);
-                let desired_address: f32 = self
-                    .folder
-                    .ancestors()
-                    .map(|path| {
-                        ui.painter()
-                            .layout_no_wrap(
-                                crate::folder_navigation::folder_name(path),
-                                egui::TextStyle::Body.resolve(ui.style()),
-                                crate::chrome::FOREGROUND,
-                            )
-                            .size()
-                            .x
-                            + if self.has_children(path) {
-                                chrome::SEARCH_BUTTON_SIZE
-                            } else {
-                                0.0
-                            }
-                    })
-                    .sum();
-                let search_width = (total - gap - desired_address).clamp(
-                    crate::browser_controls::SEARCH_MIN,
-                    crate::browser_controls::SEARCH_MAX,
+                ui.painter().rect_filled(header, 0.0, chrome::BACKGROUND);
+                ui.style_mut().override_font_id = Some(egui::FontId::proportional(chrome::TEXT_LG));
+                let content = header.shrink(3.0);
+                let filter_width = crate::browser_controls::filter_size(ui, &self.counts.values)
+                    .x
+                    .min((content.width() - 209.0).max(0.0));
+                let filters = Rect::from_min_max(
+                    egui::pos2(content.right() - filter_width, content.top()),
+                    content.max,
                 );
-                let address = Rect::from_min_size(
-                    content.min + egui::vec2(navigation_width, crate::browser_controls::INSET),
-                    egui::vec2(
-                        (total - gap - search_width).max(0.0),
-                        crate::browser_controls::text_height(ui),
-                    ),
-                );
-                let search = Rect::from_min_max(
-                    egui::pos2(address.right() + gap, address.top()),
-                    egui::pos2(content.right(), address.bottom()),
+                crate::browser_controls::filters(
+                    ui,
+                    filters,
+                    &self.counts.values,
+                    &mut self.filter,
                 );
                 for (index, forward) in [false, true].into_iter().enumerate() {
                     let rect = Rect::from_min_size(
-                        egui::pos2(
-                            content.left() + index as f32 * chrome::SEARCH_BUTTON_SIZE,
-                            address.top(),
-                        ),
-                        egui::vec2(chrome::SEARCH_BUTTON_SIZE, address.height()),
+                        content.min + egui::vec2(index as f32 * 26.0, 0.0),
+                        Vec2::splat(24.0),
                     );
-                    let available = self.navigation[index] && ui.is_enabled();
+                    let label = localization::text(
+                        context,
+                        if forward {
+                            Text::CommandHistoryForward
+                        } else {
+                            Text::CommandHistoryBack
+                        },
+                    );
                     let response = ui
-                        .add_enabled_ui(available, |ui| {
-                            ui.interact(
+                        .add_enabled_ui(self.navigation[index], |ui| {
+                            crate::status_bar::icon_at(
+                                ui,
                                 rect,
-                                ui.id().with(("history", forward)),
-                                egui::Sense::click(),
+                                if forward {
+                                    crate::fluent::Kind::Move
+                                } else {
+                                    crate::fluent::Kind::Back
+                                },
+                                false,
+                                label,
                             )
                         })
-                        .inner
-                        .on_hover_cursor(egui::CursorIcon::PointingHand);
-                    let text = if forward {
-                        Text::CommandHistoryForward
-                    } else {
-                        Text::CommandHistoryBack
-                    };
-                    let label = localization::text(context, text);
-                    response.widget_info(|| {
-                        egui::WidgetInfo::labeled(egui::WidgetType::Button, available, label)
-                    });
-                    crate::fluent::paint(
-                        ui,
-                        rect,
-                        if forward {
-                            crate::fluent::Kind::Move
-                        } else {
-                            crate::fluent::Kind::Back
-                        },
-                        if self.navigation[index] {
-                            crate::chrome::FOREGROUND
-                        } else {
-                            chrome::MUTED
-                        },
-                    );
-                    if available && response.clicked() {
+                        .inner;
+                    if response.clicked() {
                         target = Some(Action::History(forward));
                     }
-                    response.help_text(label);
                 }
-                self.address_bar(ui, address, &mut target);
+                let search = Rect::from_min_max(
+                    content.min + egui::vec2(52.0, 0.0),
+                    egui::pos2(
+                        (filters.left() - 2.0).max(content.left() + 52.0),
+                        content.bottom(),
+                    ),
+                );
                 let search_id = ui.id().with(("filmstrip-search", self.tab));
                 if self.restore_search_focus && ui.is_enabled() {
                     ui.data_mut(|data| data.insert_temp(search_id.with("editing"), true));
@@ -342,21 +315,69 @@ impl Browser {
                     ui,
                     search,
                     search_id,
-                    &format!(
-                        "{} {}",
-                        localization::text(context, Text::FilmstripSearch),
-                        crate::folder_navigation::folder_name(&self.folder)
-                    ),
+                    localization::text(context, Text::FilmstripSearch),
                     &mut self.query,
                 );
+                if !crate::browser_controls::search_active(ui, search_id, &self.query) {
+                    let left = search.left() + 26.0 + chrome::TAB_PADDING;
+                    let path = self.current_path.clone();
+                    let name = path.as_deref().map(crate::display_name);
+                    let name_width = name
+                        .as_ref()
+                        .map_or(0.0, |name| crate::status_bar::width(ui, name))
+                        .min(((search.right() - left) * 0.4).max(0.0));
+                    let address = Rect::from_min_max(
+                        egui::pos2(left, search.top()),
+                        egui::pos2(
+                            (search.right() - name_width - 20.0).max(left),
+                            search.bottom(),
+                        ),
+                    );
+                    let end = self.address_bar(ui, address, &mut target);
+                    if let (Some(path), Some(name)) = (path, name) {
+                        let slash = Rect::from_min_size(
+                            egui::pos2(end + 2.0, search.top()),
+                            egui::vec2(16.0, 24.0),
+                        );
+                        ui.painter().text(
+                            slash.center(),
+                            egui::Align2::CENTER_CENTER,
+                            "/",
+                            egui::FontId::proportional(chrome::TEXT_LG),
+                            chrome::MUTED,
+                        );
+                        let slot = Rect::from_min_size(
+                            slash.right_top() + egui::vec2(2.0, 0.0),
+                            egui::vec2(name_width, 24.0),
+                        );
+                        let response = crate::status_bar::item_at(
+                            ui,
+                            slot,
+                            egui::RichText::new(name).size(chrome::TEXT_LG),
+                            true,
+                        );
+                        let mut menu_actions = Vec::new();
+                        crate::status_bar::path_menu(
+                            ui,
+                            &response,
+                            &path,
+                            self.owner,
+                            &mut menu_actions,
+                        );
+                        if let Some(crate::UiAction::ThumbnailMenu(intent)) = menu_actions.pop() {
+                            target = Some(Action::Menu(intent));
+                        }
+                    }
+                }
                 // Tab chrome releases text focus before dispatching the tab switch.
                 // Keep the departing editor's role through that pointer gesture.
+                let title_bottom = context.content_rect().top() + chrome::TITLE_HEIGHT;
                 let chrome_gesture = ui.input(|input| {
                     (input.pointer.any_down() || input.pointer.any_released())
                         && input
                             .pointer
                             .interact_pos()
-                            .is_some_and(|pos| pos.y < screen.top())
+                            .is_some_and(|pos| pos.y < title_bottom)
                 });
                 if ui.is_enabled() && !chrome_gesture {
                     self.search_focused = ui.memory(|memory| memory.has_focus(search_id));
@@ -371,9 +392,9 @@ impl Browser {
         target
     }
 
-    fn address_bar(&mut self, ui: &mut Ui, outer: Rect, target: &mut Option<Action>) {
+    fn address_bar(&mut self, ui: &mut Ui, outer: Rect, target: &mut Option<Action>) -> f32 {
         let language = localization::language(ui.ctx());
-        self.menu_floor = outer.bottom();
+        self.menu_floor = ui.ctx().content_rect().top() + chrome::TITLE_HEIGHT;
         let available = outer.width().max(0.0);
         let mut paths: Vec<_> = self.folder.ancestors().map(Path::to_owned).collect();
         paths.reverse();
@@ -390,7 +411,7 @@ impl Browser {
                     .size()
                     .x
                     + if self.has_children(path) {
-                        chrome::SEARCH_BUTTON_SIZE
+                        chrome::ICON_SIZE + 2.0
                     } else {
                         0.0
                     }
@@ -400,7 +421,7 @@ impl Browser {
         while first + 1 < paths.len()
             && widths[first..].iter().sum::<f32>()
                 + if first > 0 {
-                    chrome::SEARCH_BUTTON_SIZE
+                    chrome::ICON_SIZE + 2.0
                 } else {
                     0.0
                 }
@@ -412,7 +433,7 @@ impl Browser {
         if first > 0 && available > 60.0 {
             let rect = Rect::from_min_size(
                 egui::pos2(x, outer.top()),
-                egui::vec2(chrome::SEARCH_BUTTON_SIZE, outer.height()),
+                egui::vec2(chrome::ICON_SIZE + 2.0, outer.height()),
             );
             let response = crate::browser_controls::text_button_color(
                 ui,
@@ -420,13 +441,14 @@ impl Browser {
                 ui.id().with("ancestors"),
                 "…",
                 false,
-                crate::chrome::FOREGROUND,
+                crate::chrome::MUTED,
             );
             if response.clicked() {
                 self.menu_open = Some(egui::Popup::default_response_id(&response));
             }
             egui::Popup::menu(&response)
                 .style(chrome::menu_style)
+                .align(egui::RectAlign::TOP_START)
                 .align_alternatives(&[])
                 .show(|ui| {
                     let entries: Vec<_> = paths[..first]
@@ -451,13 +473,16 @@ impl Browser {
             let has_children = self.has_children(path);
             let split = (rect.right()
                 - if has_children {
-                    chrome::SEARCH_BUTTON_SIZE
+                    chrome::ICON_SIZE + 2.0
                 } else {
                     0.0
                 })
             .max(rect.left());
             let name = Rect::from_min_max(rect.min, egui::pos2(split, rect.bottom()));
-            let arrow = Rect::from_min_max(egui::pos2(split, rect.top()), rect.max);
+            let arrow = Rect::from_center_size(
+                egui::pos2(rect.right() - 8.0, rect.center().y),
+                Vec2::splat(16.0),
+            );
             let label = crate::folder_navigation::folder_name(path);
             let name_response = ui
                 .push_id(("crumb", path), |ui| {
@@ -467,7 +492,7 @@ impl Browser {
                         ui.id().with("name"),
                         &label,
                         false,
-                        crate::chrome::FOREGROUND,
+                        crate::chrome::MUTED,
                     )
                 })
                 .inner
@@ -506,16 +531,20 @@ impl Browser {
                 if arrow_response.clicked() {
                     self.menu_open = Some(popup_id);
                 }
-                let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
-                let glyph = if open { '\u{eab4}' } else { '\u{eab6}' };
-                let galley = ui.painter().layout_no_wrap(
-                    glyph.to_string(),
-                    crate::fonts::icon_font(),
-                    crate::chrome::FOREGROUND,
+                if arrow_response.hovered() {
+                    ui.painter()
+                        .rect_filled(arrow, chrome::RADIUS_XS, chrome::ACTIVE_TAB);
+                }
+                crate::fluent::paint(
+                    ui,
+                    arrow,
+                    crate::fluent::Kind::ChevronUp,
+                    if arrow_response.hovered() {
+                        chrome::FOREGROUND
+                    } else {
+                        chrome::MUTED
+                    },
                 );
-                let origin = arrow.center() - galley.mesh_bounds.center().to_vec2();
-                ui.painter()
-                    .galley(origin, galley, crate::chrome::FOREGROUND);
             }
             if name_response.clicked() || name_response.middle_clicked() {
                 *target = Some(Action::Folder(path.clone(), name_response.middle_clicked()));
@@ -523,13 +552,15 @@ impl Browser {
             if let Some(arrow_response) = &arrow_response {
                 egui::Popup::menu(arrow_response)
                     .style(chrome::menu_style)
+                    .align(egui::RectAlign::TOP_START)
                     .align_alternatives(&[])
                     .show(|ui| {
                         self.directory_menu(ui, path, 0, target);
                     });
             }
-            x = rect.right();
+            x = rect.right() + 2.0;
         }
+        x
     }
 
     fn has_children(&self, path: &Path) -> bool {
@@ -821,43 +852,6 @@ impl Browser {
         if target.is_some() {
             egui::Popup::close_all(ui.ctx());
         }
-    }
-
-    pub fn show_filters(&mut self, context: &Context, screen: Rect, enabled: bool) {
-        let inset = screen.shrink(crate::browser_controls::INSET);
-        egui::Area::new("filmstrip-filters".into())
-            .order(egui::Order::Middle)
-            .fade_in(false)
-            .movable(false)
-            .pivot(egui::Align2::RIGHT_BOTTOM)
-            .fixed_pos(inset.max)
-            .sense(egui::Sense::hover())
-            .constrain(false)
-            .show(context, |ui| {
-                context.set_sublayer(
-                    egui::LayerId::new(egui::Order::Middle, "filmstrip".into()),
-                    ui.layer_id(),
-                );
-                ui.set_clip_rect(screen);
-                if !enabled {
-                    let opacity = ui.opacity();
-                    ui.disable();
-                    ui.set_opacity(opacity);
-                }
-                let mut size = crate::browser_controls::filter_size(ui, &self.counts.values);
-                size.x = size.x.min(inset.width());
-                let size_id = ui.id().with("content-size");
-                if ui.data(|data| data.get_temp::<Vec2>(size_id)) != Some(size) {
-                    ui.data_mut(|data| data.insert_temp(size_id, size));
-                    // Resolve the bottom-right pivot against this content width before
-                    // presenting a resize or a changed set of superscript counts.
-                    context.request_discard("Resolve Filmstrip filter bounds");
-                }
-                ui.set_min_size(size);
-                ui.set_max_size(size);
-                let rect = Rect::from_min_size(ui.min_rect().min, size);
-                crate::browser_controls::filters(ui, rect, &self.counts.values, &mut self.filter);
-            });
     }
 }
 

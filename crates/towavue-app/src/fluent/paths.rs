@@ -882,5 +882,69 @@ pub(super) fn paths(kind: Kind) -> Vec<Path> {
             path.close();
             path.finish().expect("pinned Fluent path")
         }],
+        Kind::Search => vec![{
+            let mut path = PathBuilder::new();
+            path.move_to(11.0195, 11.7266);
+            path.cubic_to(10.0658, 12.5217, 8.83875, 13.0, 7.5, 13.0);
+            path.cubic_to(4.46243, 13.0, 2.0, 10.5376, 2.0, 7.5);
+            path.cubic_to(2.0, 4.46243, 4.46243, 2.0, 7.5, 2.0);
+            path.cubic_to(10.5376, 2.0, 13.0, 4.46243, 13.0, 7.5);
+            path.cubic_to(13.0, 8.83875, 12.5217, 10.0658, 11.7266, 11.0195);
+            path.line_to(14.8535, 14.1464);
+            path.cubic_to(15.0488, 14.3417, 15.0488, 14.6583, 14.8535, 14.8536);
+            path.cubic_to(14.6583, 15.0488, 14.3417, 15.0488, 14.1464, 14.8536);
+            path.line_to(11.0195, 11.7266);
+            path.close();
+            path.move_to(12.0, 7.5);
+            path.cubic_to(12.0, 5.01472, 9.98528, 3.0, 7.5, 3.0);
+            path.cubic_to(5.01472, 3.0, 3.0, 5.01472, 3.0, 7.5);
+            path.cubic_to(3.0, 9.98528, 5.01472, 12.0, 7.5, 12.0);
+            path.cubic_to(9.98528, 12.0, 12.0, 9.98528, 12.0, 7.5);
+            path.close();
+            path.finish().expect("pinned Fluent path")
+        }],
+        Kind::ChevronUp => vec![{
+            let mut path = PathBuilder::new();
+            path.move_to(3.14645, 10.3536);
+            path.cubic_to(3.34171, 10.5488, 3.65829, 10.5488, 3.85355, 10.3536);
+            path.line_to(8.0, 6.20711);
+            path.line_to(12.1464, 10.3536);
+            path.cubic_to(12.3417, 10.5488, 12.6583, 10.5488, 12.8536, 10.3536);
+            path.cubic_to(13.0488, 10.1583, 13.0488, 9.84171, 12.8536, 9.64645);
+            path.line_to(8.35355, 5.14645);
+            path.cubic_to(8.15829, 4.95118, 7.84171, 4.95118, 7.64645, 5.14645);
+            path.line_to(3.14645, 9.64645);
+            path.cubic_to(2.95118, 9.84171, 2.95118, 10.1583, 3.14645, 10.3536);
+            path.close();
+            path.finish().expect("pinned Fluent path")
+        }],
+        Kind::Dismiss => vec![{
+            let mut path = PathBuilder::new();
+            path.move_to(2.58859, 2.71569);
+            path.line_to(2.64645, 2.64645);
+            path.cubic_to(2.82001, 2.47288, 3.08944, 2.4536, 3.28431, 2.58859);
+            path.line_to(3.35355, 2.64645);
+            path.line_to(8.0, 7.293);
+            path.line_to(12.6464, 2.64645);
+            path.cubic_to(12.8417, 2.45118, 13.1583, 2.45118, 13.3536, 2.64645);
+            path.cubic_to(13.5488, 2.84171, 13.5488, 3.15829, 13.3536, 3.35355);
+            path.line_to(8.707, 8.0);
+            path.line_to(13.3536, 12.6464);
+            path.cubic_to(13.5271, 12.82, 13.5464, 13.0894, 13.4114, 13.2843);
+            path.line_to(13.3536, 13.3536);
+            path.cubic_to(13.18, 13.5271, 12.9106, 13.5464, 12.7157, 13.4114);
+            path.line_to(12.6464, 13.3536);
+            path.line_to(8.0, 8.707);
+            path.line_to(3.35355, 13.3536);
+            path.cubic_to(3.15829, 13.5488, 2.84171, 13.5488, 2.64645, 13.3536);
+            path.cubic_to(2.45118, 13.1583, 2.45118, 12.8417, 2.64645, 12.6464);
+            path.line_to(7.293, 8.0);
+            path.line_to(2.64645, 3.35355);
+            path.cubic_to(2.47288, 3.17999, 2.4536, 2.91056, 2.58859, 2.71569);
+            path.line_to(2.64645, 2.64645);
+            path.line_to(2.58859, 2.71569);
+            path.close();
+            path.finish().expect("pinned Fluent path")
+        }],
     }
 }

@@ -15,6 +15,7 @@ pub(crate) enum Scope {
     Gallery,
     Filmstrip,
     Playlist,
+    Status,
     Folder,
 }
 
@@ -45,6 +46,29 @@ pub(crate) fn show(
     owner: Option<Owner>,
     actions: &mut Vec<UiAction>,
 ) {
+    show_with_trigger(ui, response, path, scope, owner, actions, false);
+}
+
+pub(crate) fn show_on_click(
+    ui: &egui::Ui,
+    response: &egui::Response,
+    path: &Path,
+    scope: Scope,
+    owner: Option<Owner>,
+    actions: &mut Vec<UiAction>,
+) {
+    show_with_trigger(ui, response, path, scope, owner, actions, true);
+}
+
+fn show_with_trigger(
+    ui: &egui::Ui,
+    response: &egui::Response,
+    path: &Path,
+    scope: Scope,
+    owner: Option<Owner>,
+    actions: &mut Vec<UiAction>,
+    primary: bool,
+) {
     let language = localization::language(ui.ctx());
     let popup = egui::Popup::default_response_id(response);
     let owner_id = popup.with("thumbnail-owner");
@@ -57,17 +81,40 @@ pub(crate) fn show(
         egui::Popup::close_id(ui.ctx(), popup);
         return;
     }
-    let chosen = tab_menu::popup(ui, response, response, |ui| {
-        chrome::menu(ui);
-        ui.set_min_width(170.0);
-        let keyboard = menu::MenuKeyboard::begin(ui);
-        let mut items = Vec::new();
-        let mut chosen = None;
-        if scope != Scope::Playlist {
+    let chosen = tab_menu::popup_with_pointer(
+        ui,
+        response,
+        response,
+        response.secondary_clicked() || (primary && response.clicked()),
+        |ui| {
+            chrome::menu(ui);
+            ui.set_min_width(170.0);
+            let keyboard = menu::MenuKeyboard::begin(ui);
+            let mut items = Vec::new();
+            let mut chosen = None;
+            if !matches!(scope, Scope::Playlist | Scope::Status) {
+                for (label, action) in [
+                    (Text::ThumbnailOpen.in_language(language), Action::Open),
+                    (Text::ThumbnailTab.in_language(language), Action::Tab),
+                    (Text::ThumbnailWindow.in_language(language), Action::Window),
+                ] {
+                    let response = ui.button(label);
+                    items.push((response.id, response.enabled()));
+                    if response.clicked() {
+                        chosen = Some(action);
+                    }
+                }
+                chrome::separator(ui);
+            }
             for (label, action) in [
-                (Text::ThumbnailOpen.in_language(language), Action::Open),
-                (Text::ThumbnailTab.in_language(language), Action::Tab),
-                (Text::ThumbnailWindow.in_language(language), Action::Window),
+                (
+                    Text::CommandCopyFilePath.in_language(language),
+                    Action::Copy,
+                ),
+                (
+                    Text::CommandRevealFile.in_language(language),
+                    Action::Reveal,
+                ),
             ] {
                 let response = ui.button(label);
                 items.push((response.id, response.enabled()));
@@ -75,65 +122,48 @@ pub(crate) fn show(
                     chosen = Some(action);
                 }
             }
-            chrome::separator(ui);
-        }
-        for (label, action) in [
-            (
-                Text::CommandCopyFilePath.in_language(language),
-                Action::Copy,
-            ),
-            (
-                Text::CommandRevealFile.in_language(language),
-                Action::Reveal,
-            ),
-        ] {
-            let response = ui.button(label);
-            items.push((response.id, response.enabled()));
-            if response.clicked() {
-                chosen = Some(action);
+            if scope != Scope::Folder {
+                chrome::separator(ui);
             }
-        }
-        if scope != Scope::Folder {
-            chrome::separator(ui);
-        }
-        match scope {
-            Scope::Folder => {}
-            Scope::Gallery => {
-                let response = ui.button(Text::RemoveHistory.in_language(language));
-                items.push((response.id, response.enabled()));
-                if response.clicked() {
-                    chosen = Some(Action::RemoveHistory);
-                }
-            }
-            Scope::Filmstrip | Scope::Playlist => {
-                for (label, kind) in [
-                    (
-                        Text::ThumbnailRename.in_language(language),
-                        file_operations::Kind::Rename,
-                    ),
-                    (
-                        Text::ThumbnailMove.in_language(language),
-                        file_operations::Kind::Move,
-                    ),
-                    (
-                        Text::ThumbnailDelete.in_language(language),
-                        file_operations::Kind::Delete,
-                    ),
-                ] {
-                    let response = ui.button(label);
+            match scope {
+                Scope::Folder => {}
+                Scope::Gallery => {
+                    let response = ui.button(Text::RemoveHistory.in_language(language));
                     items.push((response.id, response.enabled()));
                     if response.clicked() {
-                        chosen = Some(Action::File(kind));
+                        chosen = Some(Action::RemoveHistory);
+                    }
+                }
+                Scope::Filmstrip | Scope::Playlist | Scope::Status => {
+                    for (label, kind) in [
+                        (
+                            Text::ThumbnailRename.in_language(language),
+                            file_operations::Kind::Rename,
+                        ),
+                        (
+                            Text::ThumbnailMove.in_language(language),
+                            file_operations::Kind::Move,
+                        ),
+                        (
+                            Text::ThumbnailDelete.in_language(language),
+                            file_operations::Kind::Delete,
+                        ),
+                    ] {
+                        let response = ui.button(label);
+                        items.push((response.id, response.enabled()));
+                        if response.clicked() {
+                            chosen = Some(Action::File(kind));
+                        }
                     }
                 }
             }
-        }
-        keyboard.finish(ui, items);
-        if chosen.is_some() {
-            ui.close();
-        }
-        chosen
-    });
+            keyboard.finish(ui, items);
+            if chosen.is_some() {
+                ui.close();
+            }
+            chosen
+        },
+    );
     if egui::Popup::is_id_open(ui.ctx(), popup) {
         ui.ctx().data_mut(|data| data.insert_temp(owner_id, owner));
     } else {
@@ -180,6 +210,17 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     return;
                 }
             }
+            Scope::Status => {
+                if self.displayed_image_path() != Some(&path)
+                    || self.current_source_deleted()
+                    || matches!(
+                        intent.action,
+                        Action::Open | Action::Window | Action::Tab | Action::RemoveHistory
+                    )
+                {
+                    return;
+                }
+            }
             Scope::Playlist => {
                 if self.media_kind != Some(MediaKind::Audio)
                     || self.filmstrip_open
@@ -212,8 +253,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             Scope::Filmstrip if self.filmstrip_target(&path).is_none() => return,
             Scope::Filmstrip => {}
         }
-        if matches!(intent.scope, Scope::Filmstrip | Scope::Playlist)
-            && self.current_source_deleted()
+        if matches!(
+            intent.scope,
+            Scope::Filmstrip | Scope::Playlist | Scope::Status
+        ) && self.current_source_deleted()
             && self.path.as_ref() == Some(&path)
             && !matches!(intent.action, Action::Open | Action::Copy)
         {
@@ -253,7 +296,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             Action::RemoveHistory if intent.scope == Scope::Gallery => self.handle_recent_action(
                 menu::RecentAction::Remove(path, towavue_runtime_windows::RecentKind::File),
             ),
-            Action::File(kind) if matches!(intent.scope, Scope::Filmstrip | Scope::Playlist) => {
+            Action::File(kind)
+                if matches!(
+                    intent.scope,
+                    Scope::Filmstrip | Scope::Playlist | Scope::Status
+                ) =>
+            {
                 self.begin_file_relocation_at(kind, path)
             }
             Action::Open if intent.scope == Scope::Filmstrip => {

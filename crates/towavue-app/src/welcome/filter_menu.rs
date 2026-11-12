@@ -11,7 +11,7 @@ struct Gesture {
 
 /// A primary press opens the menu; its matching release may choose a row.
 /// Retain the frame decision across egui sizing passes without replaying it.
-pub(super) fn show(
+pub(crate) fn show(
     response: &Response,
     content: impl FnOnce(&mut egui::Ui, &mut dyn FnMut(&Response) -> bool),
 ) {

@@ -60,7 +60,14 @@ impl CommandPalette {
                     if !group.is_empty() {
                         row::category(ui, group);
                     }
-                    let shortcut = shortcuts.label(definition.id, commands);
+                    // The command catalog documents every configured alternative, including
+                    // keys temporarily owned by another mode (such as video rotation).
+                    let shortcut = shortcuts
+                        .all(definition.id)
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(" / ");
                     let (_, row) = ui.allocate_space(egui::vec2(
                         ui.available_width(),
                         crate::chrome::ROW_HEIGHT,

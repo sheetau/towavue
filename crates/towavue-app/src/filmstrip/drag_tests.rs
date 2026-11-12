@@ -2127,7 +2127,7 @@ fn filmstrip_disables_underlying_seek_hover_and_input_until_closed() {
             !open,
             "seek hover thumb, filmstrip={open}"
         );
-        let (id, node) = output
+        let slider = output
             .platform_output
             .accesskit_update
             .as_ref()
@@ -2135,24 +2135,27 @@ fn filmstrip_disables_underlying_seek_hover_and_input_until_closed() {
             .nodes
             .iter()
             .find(|(_, node)| node.label() == Some("Image position"))
-            .expect("seek slider");
-        assert_eq!(node.is_disabled(), open);
-        let (_, actions) = render(
-            &mut app,
-            vec![egui::Event::AccessKitActionRequest(
-                egui::accesskit::ActionRequest {
-                    action: egui::accesskit::Action::SetValue,
-                    target_tree: egui::accesskit::TreeId::ROOT,
-                    target_node: *id,
-                    data: Some(egui::accesskit::ActionData::NumericValue(3.0)),
-                },
-            )],
-        );
-        assert_eq!(
-            actions.is_empty(),
-            open,
-            "accessible seek, filmstrip={open}"
-        );
+            .map(|(id, node)| (*id, node));
+        assert_eq!(slider.is_none(), open);
+        if let Some((id, node)) = slider {
+            assert!(!node.is_disabled());
+            let (_, actions) = render(
+                &mut app,
+                vec![egui::Event::AccessKitActionRequest(
+                    egui::accesskit::ActionRequest {
+                        action: egui::accesskit::Action::SetValue,
+                        target_tree: egui::accesskit::TreeId::ROOT,
+                        target_node: id,
+                        data: Some(egui::accesskit::ActionData::NumericValue(3.0)),
+                    },
+                )],
+            );
+            assert_eq!(
+                actions.is_empty(),
+                open,
+                "accessible seek, filmstrip={open}"
+            );
+        }
         render(&mut app, vec![pointer(position, true)]);
         let (_, actions) = render(&mut app, vec![pointer(position, false)]);
         assert_eq!(actions.is_empty(), open, "pointer seek, filmstrip={open}");
@@ -3072,7 +3075,7 @@ fn filmstrip_pending_order_and_deliveries_do_not_interrupt_swipes_or_momentum() 
                     raw.time = Some(step as f64 / 60.0);
                     let mut actions = Vec::new();
                     let _ = context.run_ui(raw, |_| {
-                        app.draw_filmstrip(&context, context.content_rect(), &mut actions);
+                        app.draw_filmstrip(&context, context.content_rect(), None, &mut actions);
                         if discard && context.current_pass_index() == 0 {
                             context.request_discard("Shell delivery during swipe");
                         }
@@ -3699,7 +3702,7 @@ fn filmstrip_file_mutations_keep_the_open_view_through_pending_and_changed_order
         let draw = |app: &mut Application<_>, events| {
             let mut actions = Vec::new();
             let output = context.run_ui(input(events), |_| {
-                app.draw_filmstrip(&context, context.content_rect(), &mut actions);
+                app.draw_filmstrip(&context, context.content_rect(), None, &mut actions);
                 if context.current_pass_index() == 0 {
                     context.request_discard("mutation layout control");
                 }

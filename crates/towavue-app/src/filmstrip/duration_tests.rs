@@ -453,7 +453,7 @@ fn gallery_grid_reaches_gpu_without_card_backgrounds() {
                         crate::welcome::show(
                             ui,
                             &mut Default::default(),
-                            &mut String::new(),
+                            "",
                             &mut None,
                             &paths,
                             true,

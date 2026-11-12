@@ -60,15 +60,15 @@ fn verify_video_selection_zoom<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mu
             .accesskit_update
             .expect("status tree");
         assert!(
-            tree.nodes
-                .iter()
-                .any(|(_, node)| node.value().is_some_and(|text| {
+            tree.nodes.iter().any(
+                |(_, node)| node.label().or_else(|| node.value()).is_some_and(|text| {
                     if app.view_drag.is_some() {
                         text == expected
                     } else {
                         text.contains(&format!(" · {expected}"))
                     }
-                })),
+                })
+            ),
             "drag metrics or released path suffix: {expected}"
         );
         app.status_message = notice;

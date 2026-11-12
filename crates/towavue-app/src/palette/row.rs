@@ -16,6 +16,35 @@ pub(super) fn category(ui: &mut egui::Ui, label: &str) {
 /// measured once and reserved in the row so long names cannot overlap actions.
 pub(super) struct Keycaps(Vec<(std::sync::Arc<egui::Galley>, bool)>, f32);
 
+// A slash or plus can itself be a key. Split alternatives first, then chord
+// boundaries; a trailing plus is the literal Plus key, not a separator.
+fn key_parts(label: &str) -> Vec<(&str, bool)> {
+    let mut parts = Vec::new();
+    for (alternative, sequence) in label.split(" / ").enumerate() {
+        if alternative > 0 {
+            parts.push(("/", false));
+        }
+        for (index, stroke) in sequence.split_whitespace().enumerate() {
+            if index > 0 {
+                parts.push((" ", false));
+            }
+            let mut remainder = stroke;
+            while let Some((modifier, rest)) = remainder.split_once('+') {
+                if modifier.is_empty() {
+                    break;
+                }
+                parts.push((modifier, true));
+                parts.push(("+", false));
+                remainder = rest;
+            }
+            if !remainder.is_empty() {
+                parts.push((remainder, true));
+            }
+        }
+    }
+    parts
+}
+
 impl Keycaps {
     pub fn new(ui: &egui::Ui, label: &str, selected: bool) -> Self {
         let color = if selected {
@@ -23,18 +52,7 @@ impl Keycaps {
         } else {
             crate::chrome::MUTED
         };
-        let mut parts = Vec::new();
-        let mut start = 0;
-        for (index, c) in label.char_indices() {
-            if (c == '+' || c == ' ') && index > start {
-                parts.push((&label[start..index], true));
-                parts.push((&label[index..index + c.len_utf8()], false));
-                start = index + c.len_utf8();
-            }
-        }
-        if start < label.len() {
-            parts.push((&label[start..], true));
-        }
+        let parts = key_parts(label);
         let parts: Vec<_> = parts
             .into_iter()
             .map(|(text, cap)| {
@@ -188,6 +206,28 @@ pub(super) fn overlay_scroll_bar(ui: &mut egui::Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn key_caps_distinguish_separators_from_literal_keys() {
+        assert_eq!(
+            key_parts("Ctrl+K Ctrl+/ / Ctrl++ / L"),
+            vec![
+                ("Ctrl", true),
+                ("+", false),
+                ("K", true),
+                (" ", false),
+                ("Ctrl", true),
+                ("+", false),
+                ("/", true),
+                ("/", false),
+                ("Ctrl", true),
+                ("+", false),
+                ("+", true),
+                ("/", false),
+                ("L", true),
+            ]
+        );
+    }
 
     #[test]
     fn options_caret_uses_only_frame_button_and_input_insets() {

@@ -72,7 +72,10 @@ fn seek_delta_is_white_inline_with_clock_and_does_not_replace_path_or_controls()
                                 .collect::<Vec<_>>()
                         )
                     });
-                assert_eq!(clock.galley.job.sections[0].format.color, chrome::MUTED);
+                assert_eq!(
+                    clock.galley.job.sections[0].format.color,
+                    egui::Color32::PLACEHOLDER
+                );
                 assert_eq!(
                     &clock.galley.job.text[clock.galley.job.sections[1].byte_range.start.0
                         ..clock.galley.job.sections[1].byte_range.end.0],
@@ -83,7 +86,10 @@ fn seek_delta_is_white_inline_with_clock_and_does_not_replace_path_or_controls()
                     chrome::FOREGROUND
                 );
                 if width > 340.0 {
-                    assert_eq!(clock.galley.job.sections[2].format.color, chrome::MUTED);
+                    assert_eq!(
+                        clock.galley.job.sections[2].format.color,
+                        egui::Color32::PLACEHOLDER
+                    );
                 }
                 let volume = texts
                     .iter()

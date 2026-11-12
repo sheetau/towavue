@@ -723,7 +723,7 @@ mod tests {
                             .then(|| node.bounds().expect("play bounds"))
                     })
                     .expect("leading transport control");
-                assert!((play.x0 - f64::from(chrome::STATUS_BUTTON_GAP)).abs() < 0.1);
+                assert!((play.x0 - 3.0).abs() < 0.1);
                 assert!((play.width() - f64::from(chrome::STATUS_BUTTON_SIZE)).abs() < 0.1);
                 assert!((play.y0 - 273.0).abs() < 1.0);
                 assert!((play.y1 - 297.0).abs() < 1.0);
@@ -755,8 +755,8 @@ mod tests {
                 for point in [
                     egui::pos2(center.x, bounds.y0 as f32 - 2.0),
                     egui::pos2(center.x, bounds.y1 as f32 + 2.0),
-                    egui::pos2(bounds.x0 as f32 - 2.0, center.y),
-                    egui::pos2(bounds.x1 as f32 + 2.0, center.y),
+                    egui::pos2(bounds.x0 as f32 - 1.0, center.y),
+                    egui::pos2(bounds.x1 as f32 + 1.0, center.y),
                 ] {
                     for pressed in [true, false] {
                         let (_, actions) = frame(

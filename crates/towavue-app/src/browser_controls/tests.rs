@@ -194,3 +194,35 @@ fn counts_follow_query_and_source_invalidation() {
     counts.update(&paths[..1], "photo");
     assert_eq!(counts.values, [1, 1, 0, 0]);
 }
+
+#[test]
+fn compact_filters_reserve_only_the_bright_right_aligned_button() {
+    let context = crate::fonts::test_context();
+    context.global_style_mut(crate::chrome::style);
+    context.enable_accesskit();
+    let mut selected = Some(MediaKind::Video);
+    let output = context.run_ui(egui::RawInput::default(), |ui| {
+        let counts = [300, 100, 100, 100];
+        let width = filter_width(ui, &counts, &mut selected, 120.0);
+        assert!((width - crate::status_bar::width(ui, "Video")).abs() < 0.01);
+        filters(
+            ui,
+            Rect::from_min_max(egui::pos2(280.0, 10.0), egui::pos2(400.0, 34.0)),
+            &counts,
+            &mut selected,
+        );
+    });
+    let text = output
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text() == "Video" => Some(text),
+            _ => None,
+        })
+        .expect("selected filter");
+    assert!((text.pos.x + text.galley.size().x + crate::chrome::TAB_PADDING - 400.0).abs() < 0.01);
+    assert_eq!(
+        text.galley.job.sections[0].format.color,
+        crate::chrome::FOREGROUND
+    );
+}

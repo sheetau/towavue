@@ -153,6 +153,7 @@ pub struct PlaybackSession {
     audio_selection: AudioTrackSelection,
     source_video_frame_rate: Option<f64>,
     source_video_grid_rate: Option<f64>,
+    source_video_grid_origin: MediaTime,
     video_rx: Option<Receiver<QueuedVideoFrame>>,
     pending_video: Option<QueuedVideoFrame>,
     current_video: Option<PresentationFrame>,
@@ -323,6 +324,7 @@ impl PlaybackSession {
             audio_format,
             source_video_frame_rate,
             source_video_grid_rate,
+            source_video_grid_origin,
             audio_tracks,
             subtitle_tracks,
         } = decode::probe_playback_formats(path, selected)?;
@@ -345,6 +347,7 @@ impl PlaybackSession {
             audio_selection: selection,
             source_video_frame_rate,
             source_video_grid_rate,
+            source_video_grid_origin,
             video_rx: None,
             pending_video: None,
             current_video: None,
@@ -1207,6 +1210,11 @@ impl PlaybackSession {
     /// Base timestamp grid reported by the source, distinct from average FPS.
     pub fn source_video_grid_rate(&self) -> Option<f64> {
         self.source_video_grid_rate
+    }
+
+    /// Video stream start on the same normalized time axis as decoded frame PTS.
+    pub fn source_video_grid_origin(&self) -> MediaTime {
+        self.source_video_grid_origin
     }
 
     pub fn video_geometry(&self) -> Option<(u32, u32, f32)> {

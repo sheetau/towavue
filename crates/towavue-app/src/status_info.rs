@@ -194,7 +194,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         if details.fields.len() > format_field
             && matches!(self.media_kind, Some(MediaKind::Image | MediaKind::Video))
         {
-            details.actions[format_field] = Some(Action::Palette("resize"));
+            details.actions[format_field] = Some(Action::Palette("resize / resample"));
         }
         if dimensions.is_some() && details.fields.len() == format_field + 2 {
             let dimensions = details.fields.pop().expect("dimensions field");

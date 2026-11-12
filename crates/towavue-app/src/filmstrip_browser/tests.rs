@@ -959,10 +959,14 @@ fn browser_chevrons_center_the_visible_glyph_inside_the_unchanged_hitbox() {
                 .data(|data| {
                     data.get_temp::<(u32, egui::TextureHandle)>(egui::Id::new((
                         "fluent-icon",
-                        crate::fluent::Kind::ChevronUp,
+                        if open {
+                            crate::fluent::Kind::ChevronUp
+                        } else {
+                            crate::fluent::Kind::ChevronRight
+                        },
                     )))
                 })
-                .expect("up chevron texture")
+                .expect("chevron texture")
                 .1;
             let bounds = output
                 .shapes
@@ -976,9 +980,9 @@ fn browser_chevrons_center_the_visible_glyph_inside_the_unchanged_hitbox() {
                     }
                     _ => None,
                 })
-                .expect("Fluent up chevron");
+                .expect("Fluent chevron");
             assert!(bounds.center().distance(hitbox.center()) <= 0.75 / density);
-            assert!((hitbox.height() - 16.0).abs() < 0.01);
+            assert!((hitbox.height() - 24.0).abs() < 0.01);
         }
     }
 }
@@ -1034,7 +1038,7 @@ fn node(output: &egui::FullOutput, label: &str) -> Rect {
         .expect("tree")
         .nodes
         .iter()
-        .find(|(_, node)| node.label() == Some(label))
+        .find(|(_, node)| node.label() == Some(label) || node.value() == Some(label))
         .unwrap_or_else(|| {
             panic!(
                 "node {label}; available: {:?}",
@@ -1605,6 +1609,11 @@ fn browser_header_has_only_search_input_and_preserves_breadcrumbs_on_blank_click
                 vec![egui::Event::Text("mountain".into())],
             );
             assert_eq!(browser.query, "mountain");
+            click(&context, &mut browser, size, search.center());
+            let output = frame(&context, &mut browser, size, vec![]).0;
+            assert!(browser.query.is_empty());
+            assert!(node(&output, "Pictures").left() > search.right());
+            click(&context, &mut browser, size, search.center());
             frame(&context, &mut browser, size, vec![key(egui::Key::Escape)]);
             assert!(browser.query.is_empty());
         }
@@ -1799,7 +1808,7 @@ fn browser_header_reaches_gpu_at_supported_densities() {
                 .expect("hidden window");
             let mut renderer = towavue_runtime_windows::FrameRenderer::new(&window).expect("D3D11");
             for density in [1.0, 1.25, 2.0] {
-                for width in [480.0, 960.0] {
+                for width in [320.0, 480.0, 960.0] {
                     // Native DPI must not be modeled as UI zoom: raster rounding
                     // happens before the renderer applies that separate zoom.
                     let context = context(1.0);
@@ -1823,7 +1832,7 @@ fn browser_header_reaches_gpu_at_supported_densities() {
                         unavailable: false,
                     }));
                     browser.counts.values = [120, 80, 30, 10];
-                    for mode in 0..8 {
+                    for mode in 0..9 {
                         let previous = frame(&context, &mut browser, size, vec![]).0;
                         let close = previous
                             .platform_output
@@ -1880,6 +1889,7 @@ fn browser_header_reaches_gpu_at_supported_densities() {
                             String::new()
                         };
                         browser.filter = (mode == 2).then_some(MediaKind::Image);
+                        browser.notice = (mode == 8).then(|| "Copied file path".into());
                         let initial =
                             frame(&context, &mut browser, size, vec![egui::Event::PointerGone]).0;
                         let hover = match mode {
@@ -2218,4 +2228,30 @@ fn folder_status_menus_size_to_their_current_message() {
             );
         }
     }
+}
+
+#[test]
+fn filmstrip_notice_replaces_filename_without_owning_a_path_menu() {
+    let context = context(1.25);
+    let mut browser = Browser::default();
+    browser.sync_folder(Path::new("C:/Pictures"), &context);
+    browser.worker_failed = true;
+    browser.current_path = Some("C:/Pictures/photo.png".into());
+    browser.notice = Some("Copied path".into());
+    let size = egui::vec2(960.0, 400.0);
+    for _ in 0..3 {
+        frame(&context, &mut browser, size, vec![]);
+    }
+    let output = frame(&context, &mut browser, size, vec![]).0;
+    let notice = node(&output, "Copied path");
+    assert!(
+        click(&context, &mut browser, size, notice.center())
+            .1
+            .is_none()
+    );
+    assert!(!egui::Popup::is_any_open(&context));
+    assert!(!output.shapes.iter().any(|s| matches!(&s.shape,egui::Shape::Text(t) if t.galley.text()=="/" || t.galley.text()=="photo.png")));
+    browser.notice = None;
+    let output = frame(&context, &mut browser, size, vec![]).0;
+    assert!(node(&output, "photo.png").width() > 0.0);
 }

@@ -41,7 +41,7 @@ impl DragFixture {
         events: Vec<egui::Event>,
         shift: bool,
         repeat: bool,
-    ) -> (Layout, crate::time_selection::Output, Vec<f32>) {
+    ) -> (Layout<'static>, crate::time_selection::Output, Vec<f32>) {
         let mut result = None;
         let output = self.context.run_ui(
             egui::RawInput {
@@ -105,7 +105,7 @@ impl DragFixture {
         (layout, result, markers)
     }
 
-    fn press(&self, point: Pos2, secondary: bool) -> Layout {
+    fn press(&self, point: Pos2, secondary: bool) -> Layout<'static> {
         for _ in 0..3 {
             self.draw(vec![egui::Event::PointerMoved(point)], false, false);
         }
@@ -292,7 +292,7 @@ fn secondary_scrollbar_drag_does_not_change_view() {
     assert_eq!(released.view.span, layout.view.span);
 }
 
-fn frame(context: &egui::Context, events: Vec<egui::Event>, enabled: bool) -> Layout {
+fn frame(context: &egui::Context, events: Vec<egui::Event>, enabled: bool) -> Layout<'static> {
     let mut layout = None;
     let _ = context.run_ui(
         egui::RawInput {
@@ -798,4 +798,260 @@ fn decoded_nanosecond_pts_and_ruler_ticks_share_a_physical_pixel() {
             }
         }
     }
+}
+
+#[test]
+fn offset_video_pts_share_the_grid_after_trim_and_stretch() {
+    let Some(_root) = crate::tests::isolated_test_root(
+        "timeline_view::input_tests::offset_video_pts_share_the_grid_after_trim_and_stretch",
+    ) else {
+        return;
+    };
+    let path = std::env::temp_dir().join(format!(
+        "towavue-offset-grid-{}.nut",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    let ffmpeg = std::path::PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("FFmpeg"))
+        .join("bin/ffmpeg.exe");
+    let output = crate::tests::hidden_command(ffmpeg)
+        .args([
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=size=32x24:rate=60:duration=0.3",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=sample_rate=48000:duration=0.4",
+            "-vf",
+            "settb=1/90000,setpts=PTS+3240",
+            "-enc_time_base:v",
+            "1/90000",
+            "-fps_mode",
+            "passthrough",
+            "-c:v",
+            "ffv1",
+            "-c:a",
+            "pcm_s16le",
+            "-output_ts_offset",
+            "5",
+        ])
+        .arg(&path)
+        .output()
+        .expect("fixture");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    verify_source_grid(&path, &[0.05, 0.15], Some(time(0.036)));
+    std::fs::remove_file(path).expect("remove owned fixture");
+}
+
+#[test]
+#[ignore = "read-only owner reference; set TOWAVUE_FRAME_GRID_REFERENCE"]
+fn reference_video_pts_share_the_rendered_frame_grid() {
+    let path = std::path::PathBuf::from(
+        std::env::var_os("TOWAVUE_FRAME_GRID_REFERENCE").expect("reference path"),
+    );
+    verify_source_grid(&path, &[0.1, 10.0, 600.0, 1700.0], None);
+}
+
+fn verify_source_grid(
+    path: &std::path::Path,
+    positions: &[f64],
+    expected_origin: Option<MediaTime>,
+) {
+    use winit::application::ApplicationHandler;
+    use winit::event_loop::{ActiveEventLoop, EventLoop};
+    use winit::platform::windows::EventLoopBuilderExtWindows;
+    struct Trial<'a> {
+        path: &'a std::path::Path,
+        positions: &'a [f64],
+        origin: Option<MediaTime>,
+    }
+    impl ApplicationHandler for Trial<'_> {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            let window = event_loop
+                .create_window(winit::window::Window::default_attributes().with_visible(false))
+                .expect("hidden window");
+            let renderer = towavue_runtime_windows::FrameRenderer::new(&window).expect("D3D11");
+            verify_source_grid_on_device(
+                self.path,
+                self.positions,
+                self.origin,
+                renderer.graphics_device(),
+            );
+            event_loop.exit();
+        }
+        fn window_event(
+            &mut self,
+            _: &ActiveEventLoop,
+            _: winit::window::WindowId,
+            _: winit::event::WindowEvent,
+        ) {
+        }
+    }
+    let event_loop = EventLoop::builder()
+        .with_any_thread(true)
+        .build()
+        .expect("event loop");
+    event_loop
+        .run_app(&mut Trial {
+            path,
+            positions,
+            origin: expected_origin,
+        })
+        .expect("reference grid check");
+}
+
+fn verify_source_grid_on_device(
+    path: &std::path::Path,
+    positions: &[f64],
+    expected_origin: Option<MediaTime>,
+    device: towavue_runtime_windows::GraphicsDevice,
+) {
+    use towavue_runtime_windows::{PlaybackSession, adjacent_video_frame};
+
+    let session = PlaybackSession::open_paused(
+        path,
+        device,
+        0.0,
+        1.0,
+        towavue_core::PlaybackRange::default(),
+        |_| {},
+    )
+    .expect("session");
+    let fps = session.source_video_grid_rate().expect("grid rate");
+    let origin = session.source_video_grid_origin();
+    if let Some(expected) = expected_origin {
+        assert_eq!(origin, expected);
+    }
+    for &position in positions {
+        for forward in [false, true] {
+            let pts = adjacent_video_frame(path, time(position), forward, None, &|| false)
+                .expect("query")
+                .expect("adjacent PTS");
+            for density in [1.0, 1.25, 2.0] {
+                let fixture = DragFixture::new(
+                    (pts.as_seconds_f64() - 0.08).max(0.0),
+                    640.0 / fps / 50.0,
+                    fps,
+                );
+                fixture.context.set_pixels_per_point(density);
+                let mut cti = 0.0;
+                let output = fixture.context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            Pos2::ZERO,
+                            egui::vec2(640.0, 300.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let layout = show(
+                            ui,
+                            fixture.id,
+                            Rect::from_min_max(egui::pos2(5.0, 100.0), egui::pos2(635.0, 220.0)),
+                            time(2200.0),
+                            fps,
+                            true,
+                        )
+                        .with_source_grid(origin, None);
+                        assert!(
+                            (layout.quantize(pts).as_nanoseconds() - pts.as_nanoseconds()).abs()
+                                <= 2
+                        );
+                        cti = crate::time_selection::cti_x(
+                            layout.ruler,
+                            layout.view.x(layout.ruler, pts.as_seconds_f64()),
+                            1.0 / density,
+                        );
+                        paint(ui, layout, fps, pts, None);
+                    },
+                );
+                let aligned = output.shapes.iter().any(|shape| match &shape.shape {
+                    egui::Shape::Vec(shapes) => shapes.iter().any(|shape| matches!(shape,
+                        egui::Shape::LineSegment {points,stroke} if stroke.color==chrome::FAINT && (points[0].x-cti).abs()<0.01)),
+                    _ => false,
+                });
+                assert!(
+                    aligned,
+                    "PTS {} must share a physical pixel center with a ruler tick at {density}",
+                    pts.as_seconds_f64()
+                );
+            }
+            let end = position + 1.0;
+            let mut plan =
+                towavue_core::EditTimeline::new(time(end), towavue_core::PlaybackRange::default())
+                    .expect("plan");
+            assert!(plan.apply(towavue_core::TimelineEdit::Keep(
+                TimeRange::new(time(0.01), time(end)).expect("trim")
+            )));
+            assert!(plan.apply(towavue_core::TimelineEdit::Stretch(
+                TimeRange::new(MediaTime::ZERO, plan.duration()).expect("range"),
+                time((end - 0.01) * 1.25)
+            )));
+            let edited = plan.edited_time(pts).expect("mapped frame");
+            let fixture = DragFixture::new(0.0, 0.1, fps);
+            let layout = fixture
+                .draw(vec![], false, false)
+                .0
+                .with_source_grid(origin, Some(&plan));
+            assert!(
+                (layout.quantize(edited).as_nanoseconds() - edited.as_nanoseconds()).abs() <= 2,
+                "edited PTS"
+            );
+        }
+    }
+}
+
+#[test]
+fn trimmed_grid_labels_keep_edited_time_instead_of_source_frame_numbers() {
+    let fixture = DragFixture::new(0.0, 640.0 / 60.0 / 50.0, 60.0);
+    let plan = towavue_core::EditTimeline::new(
+        time(101.0),
+        towavue_core::PlaybackRange {
+            start: time(100.0),
+            end: Some(time(101.0)),
+        },
+    )
+    .expect("trim");
+    let output = fixture.context.run_ui(egui::RawInput::default(), |ui| {
+        let layout = show(
+            ui,
+            fixture.id,
+            Rect::from_min_max(egui::pos2(5.0, 100.0), egui::pos2(635.0, 220.0)),
+            time(1.0),
+            60.0,
+            true,
+        )
+        .with_source_grid(time(0.036), Some(&plan));
+        paint(ui, layout, 60.0, time(0.1), None);
+    });
+    let labels: Vec<_> = output
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::Shape::Vec(shapes) => Some(shapes),
+            _ => None,
+        })
+        .flatten()
+        .filter_map(|shape| match shape {
+            egui::Shape::Text(text) => Some(text.galley.text()),
+            _ => None,
+        })
+        .collect();
+    assert!(!labels.is_empty());
+    assert!(
+        labels
+            .iter()
+            .all(|label| !label.contains(':') || *label == "0:00f"),
+        "first edited second: {labels:?}"
+    );
 }

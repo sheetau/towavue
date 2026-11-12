@@ -100,9 +100,10 @@ pub(super) fn show_panel<R>(
         cancel_panel_resize(root.ctx(), panel);
     }
     let resizable = enabled && panel_resize_enabled(root, panel);
-    root.visuals_mut().widgets.active.fg_stroke.color = chrome::FOREGROUND;
-    root.visuals_mut().widgets.hovered.fg_stroke.color = chrome::FOREGROUND;
-    root.visuals_mut().widgets.noninteractive.bg_stroke.color = chrome::FOREGROUND;
+    // The idle separator retains the panel border. Only the resize feedback
+    // uses the same opaque, two-point stroke on hover and while dragging.
+    root.visuals_mut().widgets.active.fg_stroke = egui::Stroke::new(2.0, chrome::FOREGROUND);
+    root.visuals_mut().widgets.hovered.fg_stroke = egui::Stroke::new(2.0, chrome::FOREGROUND);
     let anchor_id = panel.with("resize-anchor");
     let response = root.ctx().read_response(panel.with("__resize"));
     let live = resizable

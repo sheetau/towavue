@@ -85,7 +85,10 @@ pub(super) fn item_at(
     let hot = clickable
         && response.enabled()
         && (response.hovered() || response.has_focus() || response.is_pointer_button_down_on());
-    let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(rect));
+    let painter = ui.painter().with_clip_rect(
+        ui.clip_rect()
+            .intersect(rect.expand(1.0 / ui.ctx().pixels_per_point())),
+    );
     if hot {
         painter.rect_filled(rect, chrome::RADIUS_XS, chrome::ACTIVE_TAB);
     }
@@ -123,17 +126,23 @@ pub(super) fn icon_at(
     selected: bool,
     label: &str,
 ) -> egui::Response {
-    let response = item_at(ui, rect, "", true);
-    fluent::paint(
-        ui,
-        rect,
-        kind,
-        if selected || response.hovered() {
-            chrome::FOREGROUND
-        } else {
-            chrome::MUTED
-        },
-    );
+    let id = ui.next_auto_id();
+    ui.skip_ahead_auto_ids(1);
+    let response = ui
+        .interact(rect, id, egui::Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    let color = if !response.enabled() {
+        chrome::DISABLED
+    } else if selected || response.hovered() || response.has_focus() {
+        chrome::FOREGROUND
+    } else {
+        chrome::MUTED
+    };
+    if kind == fluent::Kind::Dismiss {
+        chrome::paint_close(ui, rect, color);
+    } else {
+        fluent::paint(ui, rect, kind, color);
+    }
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), label)
     });

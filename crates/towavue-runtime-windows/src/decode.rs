@@ -2636,6 +2636,7 @@ pub(crate) struct PlaybackFormats {
     pub audio_format: Option<AudioFormat>,
     pub source_video_frame_rate: Option<f64>,
     pub source_video_grid_rate: Option<f64>,
+    pub source_video_grid_origin: MediaTime,
     pub audio_tracks: towavue_core::AudioTrackCatalog,
     pub subtitle_tracks: Vec<towavue_core::SubtitleTrack>,
 }
@@ -2656,6 +2657,20 @@ pub(crate) fn probe_playback_formats(
     let grid_rate = input.streams().best(Type::Video).and_then(|stream| {
         positive_frame_rate(stream.rate()).or_else(|| positive_frame_rate(stream.avg_frame_rate()))
     });
+    let grid_origin = input
+        .streams()
+        .best(Type::Video)
+        .map_or(MediaTime::ZERO, |stream| {
+            let start = stream.start_time();
+            if start == ffmpeg::ffi::AV_NOPTS_VALUE {
+                MediaTime::ZERO
+            } else {
+                // Match packet normalization exactly, including the time-base rounding.
+                let offset =
+                    input_origin(&input).rescale(ffmpeg::rescale::TIME_BASE, stream.time_base());
+                timestamp_to_media_time(Some(start.saturating_sub(offset)), stream.time_base())
+            }
+        });
     Ok(PlaybackFormats {
         audio_format: audio_tracks::selected_config(&input, track)?
             .map(create_audio_pipeline_from)
@@ -2663,6 +2678,7 @@ pub(crate) fn probe_playback_formats(
             .map(|pipeline| pipeline.output_format),
         source_video_frame_rate: fps,
         source_video_grid_rate: grid_rate,
+        source_video_grid_origin: grid_origin,
         audio_tracks: audio_tracks::catalog(&input),
         subtitle_tracks: crate::subtitles::catalog(&input),
     })

@@ -113,10 +113,6 @@ pub(super) fn text_button_color(
         )
     });
     let hot = response.hovered() || response.has_focus();
-    if hot {
-        ui.painter()
-            .rect_filled(rect, crate::chrome::RADIUS_XS, crate::chrome::ACTIVE_TAB);
-    }
     let color = if hot {
         crate::chrome::FOREGROUND
     } else {
@@ -174,9 +170,25 @@ pub(super) fn search(ui: &mut Ui, rect: Rect, id: Id, label: &str, query: &mut S
             )
         })
         .inner;
-    let opened = requested || (button.clicked() && !editing);
-    editing |= opened;
+    // A discard redraw can see the same click after editing has changed.
+    let frame = ui.ctx().cumulative_frame_nr();
+    let toggled = button.clicked()
+        && ui.data(|data| data.get_temp::<u64>(id.with("toggle-frame"))) != Some(frame);
+    if toggled {
+        ui.data_mut(|data| data.insert_temp(id.with("toggle-frame"), frame));
+    }
+    let closed = toggled && editing && !requested;
+    let opened = requested || (toggled && !editing);
     let mut changed = false;
+    if closed {
+        changed = !query.is_empty();
+        query.clear();
+        editing = false;
+        ui.memory_mut(|memory| memory.surrender_focus(id));
+        ui.ctx().request_discard("Restore browser status content");
+    } else {
+        editing |= opened;
+    }
     if editing {
         let input = Rect::from_min_max(
             egui::pos2(rect.left() + 26.0, rect.top()),
@@ -284,6 +296,26 @@ pub(super) fn filter_size(ui: &Ui, counts: &[usize; 4]) -> egui::Vec2 {
     )
 }
 
+/// Reserve only the selected button when the full filter row does not fit.
+pub(super) fn filter_width(
+    ui: &Ui,
+    counts: &[usize; 4],
+    current: &mut Option<MediaKind>,
+    budget: f32,
+) -> f32 {
+    normalize_filter(counts, current);
+    let width = filter_size(ui, counts).x;
+    if width <= budget {
+        width
+    } else {
+        let label = labels(ui)
+            .into_iter()
+            .find(|(_, kind)| kind == current)
+            .map_or("", |(label, _)| label);
+        crate::status_bar::width(ui, label).min(budget.max(0.0))
+    }
+}
+
 pub(super) fn filters(
     ui: &mut Ui,
     rect: Rect,
@@ -302,8 +334,10 @@ pub(super) fn filters(
             .map_or(labels[0].0, |(label, _)| *label);
         let response = crate::status_bar::item_at(
             ui,
-            rect,
-            egui::RichText::new(label).size(crate::chrome::TEXT_LG),
+            rect.with_min_x((rect.right() - crate::status_bar::width(ui, label)).max(rect.left())),
+            egui::RichText::new(label)
+                .size(crate::chrome::TEXT_LG)
+                .color(crate::chrome::FOREGROUND),
             true,
         );
         crate::welcome::filter_menu::show(&response, |ui, chosen| {
@@ -385,9 +419,12 @@ pub(super) fn gallery_status(
     use crate::localization::Text;
     let language = crate::localization::language(ui.ctx());
     let rect = ui.available_rect_before_wrap();
-    let filter_width = crate::browser_controls::filter_size(ui, counts)
-        .x
-        .min((rect.width() - (31.0 + crate::browser_controls::SEARCH_MIN + 26.0)).max(0.0));
+    let filter_width = filter_width(
+        ui,
+        counts,
+        filter,
+        (rect.width() - (31.0 + SEARCH_MIN + 26.0)).max(0.0),
+    );
     let filters = egui::Rect::from_min_max(
         egui::pos2(rect.right() - filter_width, rect.top()),
         rect.max,

@@ -169,21 +169,36 @@ pub fn tab_close_visible(ui: &mut Ui, rect: Rect, dirty: bool, visible: bool) ->
     if !visible && !dirty {
         return response;
     }
-    let glyph = if visible { '\u{ea76}' } else { '\u{ea71}' };
-    ui.painter().text(
-        response.rect.center(),
-        egui::Align2::CENTER_CENTER,
-        glyph,
-        crate::fonts::icon_font(),
-        if !response.enabled() {
-            DISABLED
-        } else if response.hovered() {
-            FOREGROUND
-        } else {
-            MUTED
-        },
-    );
+    let color = if !response.enabled() {
+        DISABLED
+    } else if response.hovered() {
+        FOREGROUND
+    } else {
+        MUTED
+    };
+    if visible {
+        paint_close(ui, response.rect, color);
+    } else {
+        ui.painter().text(
+            response.rect.center(),
+            egui::Align2::CENTER_CENTER,
+            '\u{ea71}',
+            crate::fonts::icon_font(),
+            color,
+        );
+    }
     response
+}
+
+/// The same close glyph and optical size in tabs and browser search.
+pub(super) fn paint_close(ui: &Ui, rect: Rect, color: Color32) {
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        '\u{ea76}',
+        crate::fonts::icon_font(),
+        color,
+    );
 }
 
 pub struct TitleLayout {

@@ -61,7 +61,7 @@ impl View {
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct Layout {
+pub(super) struct Layout<'a> {
     pub waveform: Rect,
     pub ruler: Rect,
     pub scrollbar: Rect,
@@ -70,10 +70,12 @@ pub(super) struct Layout {
     hover_key: egui::Id,
     key: egui::Id,
     fps: f64,
+    origin: f64,
+    timeline: Option<&'a towavue_core::EditTimeline>,
     minimum: f64,
 }
 
-impl Layout {
+impl<'a> Layout<'a> {
     #[cfg(test)]
     pub fn plain(rect: Rect, duration: MediaTime) -> Self {
         Self {
@@ -84,6 +86,8 @@ impl Layout {
             hover_key: egui::Id::NULL,
             key: egui::Id::NULL,
             fps: 0.0,
+            origin: 0.0,
+            timeline: None,
             minimum: 0.0,
             view: View {
                 start: 0.0,
@@ -99,16 +103,58 @@ impl Layout {
         let frame = context.cumulative_frame_nr();
         context.data_mut(|data| data.insert_temp(self.hover_key, frame));
     }
+    pub fn with_source_grid<'b>(
+        self,
+        origin: MediaTime,
+        timeline: Option<&'b towavue_core::EditTimeline>,
+    ) -> Layout<'b> {
+        Layout {
+            origin: origin.as_seconds_f64(),
+            timeline,
+            ..self
+        }
+    }
+
+    /// Visit source frame grids mapped through trims, cuts and stretches.
+    fn grids(self, mut visit: impl FnMut(f64, f64, f64, f64)) {
+        if let Some(timeline) = self.timeline {
+            let mut start = 0.0;
+            for span in timeline.spans() {
+                let end = start + span.duration().as_seconds_f64();
+                let rate = span.rate();
+                let origin = start + (self.origin - span.source().start().as_seconds_f64()) / rate;
+                visit(start, end, origin, self.fps * rate);
+                start = end;
+            }
+        } else {
+            visit(0.0, self.view.duration, self.origin, self.fps);
+        }
+    }
+
     /// Quantize only when a frame occupies more than one logical point.
     pub fn quantize(self, time: MediaTime) -> MediaTime {
-        if self.fps > 0.0 && f64::from(self.waveform.width()) / self.view.span / self.fps > 1.0 {
-            let frame = (time.as_seconds_f64() * self.fps)
-                .round()
-                .clamp(0.0, (self.view.duration * self.fps + 1e-9).floor());
-            MediaTime::from_nanoseconds((frame / self.fps * 1e9).round() as i64)
-        } else {
-            time
+        let seconds = time.as_seconds_f64();
+        if seconds <= 0.0 {
+            return time;
         }
+        let mut result = None;
+        self.grids(|start, end, origin, fps| {
+            if seconds >= start
+                && seconds <= end
+                && fps > 0.0
+                && f64::from(self.waveform.width()) / self.view.span / fps > 1.0
+            {
+                let first = ((start - origin) * fps - 1e-9).ceil().max(0.0);
+                let last = ((end - origin) * fps + 1e-9).floor();
+                if first <= last {
+                    let frame = ((seconds - origin) * fps).round().clamp(first, last);
+                    result = Some((origin + frame / fps).clamp(start, end));
+                }
+            }
+        });
+        result.map_or(time, |seconds| {
+            MediaTime::from_nanoseconds((seconds * 1e9).round() as i64)
+        })
     }
     pub fn frame_step(self) -> i64 {
         if self.fps > 0.0 && f64::from(self.waveform.width()) / self.view.span / self.fps > 1.0 {
@@ -177,7 +223,7 @@ pub(super) fn show(
     duration: MediaTime,
     fps: f64,
     enabled: bool,
-) -> Layout {
+) -> Layout<'static> {
     let ruler = rect.with_max_y(rect.top() + RULER_HEIGHT.min(rect.height()));
     let scrollbar = rect.with_min_y((rect.bottom() - BAR_HEIGHT).max(ruler.bottom()));
     let waveform = Rect::from_min_max(
@@ -363,6 +409,8 @@ pub(super) fn show(
         hover_key: key.with("ruler-hover-suppressed"),
         key,
         fps,
+        origin: 0.0,
+        timeline: None,
         minimum,
     }
 }
@@ -507,39 +555,55 @@ pub(super) fn paint(
     } else {
         view.span / f64::from(layout.ruler.width().max(1.0)) * 50.0
     };
-    let (step, frames) = tick_step(minimum, fps);
-    let first = (view.start / step).floor() as u64;
-    let last = (((view.start + view.span) / step).ceil() as u64)
-        .min((view.duration / step).floor() as u64);
     let mut shapes = Vec::new();
-    for tick in first..=last.min(first + 512) {
-        let seconds = tick as f64 * step;
-        let x = crate::time_selection::cti_x(
-            layout.ruler,
-            view.x(layout.ruler, seconds),
-            1.0 / ui.ctx().pixels_per_point(),
-        );
-        shapes.push(egui::Shape::line_segment(
-            [
-                egui::pos2(x, layout.ruler.bottom() - 4.0),
-                egui::pos2(x, layout.ruler.bottom()),
-            ],
-            (1.0, chrome::FAINT),
-        ));
-        let text = painter.layout_no_wrap(
-            tick_label(seconds, step, fps, frames),
-            egui::FontId::proportional(chrome::TEXT_SM),
-            chrome::MUTED,
-        );
-        let full = view.full_rect(layout.ruler);
-        let left = (x - text.size().x * 0.5)
-            .clamp(full.left(), (full.right() - text.size().x).max(full.left()));
-        shapes.push(egui::Shape::galley(
-            egui::pos2(left, layout.ruler.top() - text.mesh_bounds.top()),
-            text,
-            chrome::MUTED,
-        ));
-    }
+    let mut last_seconds = None;
+    let mut count = 0;
+    layout.grids(|start, end, origin, grid_fps| {
+        let (step, frames) = tick_step(minimum, grid_fps);
+        let origin = if frames { origin } else { 0.0 };
+        // Keep one neighboring tick so labels crossing a viewport edge remain visible.
+        let first = ((view.start - origin) / step)
+            .floor()
+            .max(((start - origin) / step - 1e-9).ceil())
+            .max(0.0) as u64;
+        let last = (((view.start + view.span - origin) / step).ceil())
+            .min(((end - origin) / step + 1e-9).floor())
+            .max(0.0) as u64;
+        for tick in first..=last.min(first + 512) {
+            let seconds = origin + tick as f64 * step;
+            if seconds > end || seconds < start || last_seconds == Some(seconds) || count >= 512 {
+                continue;
+            }
+            count += 1;
+            last_seconds = Some(seconds);
+            let x = crate::time_selection::cti_x(
+                layout.ruler,
+                view.x(layout.ruler, seconds),
+                1.0 / ui.ctx().pixels_per_point(),
+            );
+            shapes.push(egui::Shape::line_segment(
+                [
+                    egui::pos2(x, layout.ruler.bottom() - 4.0),
+                    egui::pos2(x, layout.ruler.bottom()),
+                ],
+                (1.0, chrome::FAINT),
+            ));
+            let text = painter.layout_no_wrap(
+                // Grid positions follow retained source frames; labels remain edited time.
+                tick_label(seconds, step, fps, frames),
+                egui::FontId::proportional(chrome::TEXT_SM),
+                chrome::MUTED,
+            );
+            let full = view.full_rect(layout.ruler);
+            let left = (x - text.size().x * 0.5)
+                .clamp(full.left(), (full.right() - text.size().x).max(full.left()));
+            shapes.push(egui::Shape::galley(
+                egui::pos2(left, layout.ruler.top() - text.mesh_bounds.top()),
+                text,
+                chrome::MUTED,
+            ));
+        }
+    });
     let frame = ui.ctx().cumulative_frame_nr();
     let suppressed = ui.data(|data| data.get_temp::<u64>(layout.hover_key));
     let moved = ui.input(|input| {

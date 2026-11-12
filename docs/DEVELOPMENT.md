@@ -57,7 +57,7 @@ The Release app is a GUI executable and does not open a console. Session warning
 Shared style changes use `chrome::visual_contract_tests::`, `palette::row::tests::`,
 `scroll_style::tests::` and `timeline_view::input_tests::` alongside the full workspace
 suite. These cover visible cap-height centering, distinct selected/hovered
-rows, context-filtered commands, Unicode match highlighting, scrolling end padding, live Shift snapping, frame-grid placement, selection edge markers, secondary-scrollbar exclusion and post-drag hover suppression. Timeline controls also cover rounded waveform UV clipping, bounded long-selection geometry, an exact wheel no-op at maximum zoom, the scrollbar curve and both stationary opposite handles, discarded-pass autoscroll anchors and accepted height persistence across tabs and a fresh settings store. Frame-step controls distinguish the VFR timestamp base grid from average FPS and retain the exact CTI even when the paused master clock is ahead.
+rows, context-filtered commands, Unicode match highlighting, scrolling end padding, live Shift snapping, frame-grid placement, selection edge markers, secondary-scrollbar exclusion and post-drag hover suppression. Timeline controls also cover rounded waveform UV clipping, bounded long-selection geometry, an exact wheel no-op at maximum zoom, the scrollbar curve and both stationary opposite handles, discarded-pass autoscroll anchors and accepted height persistence across tabs and a fresh settings store. Frame-step controls distinguish the VFR timestamp base grid from average FPS and retain the exact CTI even when the paused master clock is ahead. The generated offset-stream control checks a 36 ms video/audio start difference, frame-grid alignment at three densities, and trim/stretch mapping. For an explicitly supplied video, set `TOWAVUE_FRAME_GRID_REFERENCE` to its path and run `cargo test -p towavue-app --bin towavue --locked --offline reference_video_pts_share_the_rendered_frame_grid -- --ignored --nocapture --test-threads=1`. This reads the source without changing it, checks forward/backward frame PTS at 0.1, 10, 600 and 1700 seconds, and compares egui tick/CTI geometry; use a reference longer than 1700 seconds. Its native window is hidden; this is not physical desktop or GPU readback evidence.
 Inspect the retained GPU reference images as well as geometric assertions at 100%,
 125% and 200%; offscreen rendering does not replace physical owner review.
 
@@ -66,7 +66,7 @@ workspace suite: variable frame delays, pause/replay/repeat, image-edit continui
 command ownership, hidden folder seeking, ordinary-wheel frame virtualization and
 viewport-center preservation when resizing. `timeline_edit::panel_tests::` covers
 first-pixel resizing from off-center handle presses, the 30% height cap, a single
-Filmstrip dimming overlay and cancellation. Native playback coverage in
+Filmstrip dimming overlay and cancellation. Its ignored `timeline_resize_feedback_reaches_gpu_without_opacity_changes` control checks idle border and hover/drag stroke pixels at three densities using a hidden hardware D3D11 window; `TOWAVUE_REFERENCE_RENDER_DIR` retains the readbacks. Native playback coverage in
 `video_scrub::tests::exercise` includes CTI/selection scrubbing, main-surface
 preview meshes, frozen decoder generations during holds, one release seek and
 play/pause restoration on cancellation. Forward selection must retain the native press frame; reverse selection uses a preview and crossing back restores the native frame. Clock controls cover independent

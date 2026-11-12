@@ -7,6 +7,7 @@ mod paths;
 pub(crate) enum Kind {
     Search,
     ChevronUp,
+    ChevronRight,
     Dismiss,
     Keyboard,
     Play,
@@ -52,8 +53,8 @@ pub(crate) fn fill(image: &mut Pixmap, kind: Kind, paint: &Paint<'_>, transform:
     // applying the translation before scaling also fixes native taskbar icons.
     let transform = if kind == Kind::Play {
         transform.pre_translate(-1.5, 0.0)
-    } else if matches!(kind, Kind::Link | Kind::LinkOff) {
-        // Vertical link connects the width and height fields.
+    } else if matches!(kind, Kind::Link | Kind::LinkOff | Kind::ChevronRight) {
+        // Rotate the pinned Up geometry for Right and the links for vertical fields.
         transform
             .pre_translate(8.0, 8.0)
             .pre_rotate(90.0)

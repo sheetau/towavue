@@ -3,7 +3,7 @@ use super::*;
 type App = Application<fn(AppEvent)>;
 
 #[test]
-fn resize_separator_keeps_e0_and_default_width_in_each_state() {
+fn resize_feedback_keeps_e0_while_idle_separator_keeps_its_border() {
     let context = fonts::test_context();
     context.global_style_mut(chrome::style);
     let panel = egui::Id::new("separator-color");
@@ -41,15 +41,15 @@ fn resize_separator_keeps_e0_and_default_width_in_each_state() {
                 _ => None,
             })
             .expect("panel separator");
-        assert_eq!(stroke.color, chrome::FOREGROUND);
-        let style = context.global_style();
-        let widgets = &style.visuals.widgets;
-        let expected = match state {
-            0 => widgets.noninteractive.bg_stroke,
-            1 => widgets.hovered.fg_stroke,
-            _ => widgets.active.fg_stroke,
-        };
-        assert_eq!(stroke.width, expected.width);
+        assert_eq!(
+            stroke.color,
+            if state == 0 {
+                chrome::BORDER
+            } else {
+                chrome::FOREGROUND
+            }
+        );
+        assert_eq!(stroke.width, if state == 0 { 1.0 } else { 2.0 });
     }
 }
 
@@ -444,4 +444,119 @@ fn resize_moves_on_first_pixel_and_filmstrip_has_no_resize_target() {
     );
     assert_eq!(rect(&app), before);
     assert_ne!(context.dragged_id(), Some(id));
+}
+
+#[test]
+#[ignore = "requires hidden hardware D3D11; optional timeline separator readbacks"]
+fn timeline_resize_feedback_reaches_gpu_without_opacity_changes() {
+    let Some(_root) = crate::tests::isolated_test_root(
+        "timeline_edit::panel_tests::timeline_resize_feedback_reaches_gpu_without_opacity_changes",
+    ) else {
+        return;
+    };
+    use winit::application::ApplicationHandler;
+    use winit::event_loop::{ActiveEventLoop, EventLoop};
+    use winit::platform::windows::EventLoopBuilderExtWindows;
+    struct Trial(bool);
+    impl ApplicationHandler for Trial {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            let window = event_loop
+                .create_window(winit::window::Window::default_attributes().with_visible(false))
+                .expect("hidden window");
+            let mut renderer = FrameRenderer::new(&window).expect("D3D11");
+            for density in [1.0, 1.25, 2.0] {
+                let context = fonts::test_context();
+                context.global_style_mut(chrome::style);
+                let panel = egui::Id::new("gpu-resize-feedback");
+                let mut height = 96.0;
+                let mut top = egui::pos2(200.0, 224.0);
+                let width = (400.0 * density) as u32;
+                let height_pixels = (320.0 * density) as u32;
+                renderer
+                    .resize_surface(width, height_pixels)
+                    .expect("surface");
+                for state in 0..4 {
+                    let events = match state {
+                        1 => vec![egui::Event::PointerMoved(top)],
+                        2 => vec![button(top, true)],
+                        3 => vec![egui::Event::PointerMoved(top + egui::vec2(0.0, 12.0))],
+                        _ => vec![],
+                    };
+                    for pass in 0..3 {
+                        let mut input = egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(400.0, 320.0),
+                            )),
+                            events: if pass == 0 { events.clone() } else { vec![] },
+                            ..Default::default()
+                        };
+                        input
+                            .viewports
+                            .entry(egui::ViewportId::ROOT)
+                            .or_default()
+                            .native_pixels_per_point = Some(density);
+                        let output = context.run_ui(input, |ui| {
+                            let result = show_panel(
+                                ui,
+                                panel,
+                                &mut height,
+                                true,
+                                egui::Margin::ZERO,
+                                |_| {},
+                            );
+                            top = result.response.rect.center_top();
+                        });
+                        renderer.clear([0.0, 0.0, 0.0, 1.0]).expect("clear");
+                        renderer.render_ui(&context, output).expect("render");
+                    }
+                    if state == 3 {
+                        assert!(resizing_panel(&context, panel), "owned resize drag");
+                    }
+                    let pixels = renderer.verification_surface_rgba().expect("readback");
+                    let x = (top.x * density).round() as usize;
+                    let y = (top.y * density).round() as usize;
+                    let peak = (y - 5..=y + 5)
+                        .map(|y| pixels[(y * width as usize + x) * 4])
+                        .max()
+                        .expect("separator pixels");
+                    assert_eq!(
+                        peak,
+                        if state == 0 {
+                            chrome::BORDER.r()
+                        } else {
+                            chrome::FOREGROUND.r()
+                        },
+                        "state={state}, density={density}"
+                    );
+                    if let Some(directory) = std::env::var_os("TOWAVUE_REFERENCE_RENDER_DIR") {
+                        std::fs::write(
+                            PathBuf::from(directory).join(format!(
+                                "timeline-resize-{state}-{width}x{height_pixels}.rgba"
+                            )),
+                            pixels,
+                        )
+                        .expect("readback file");
+                    }
+                }
+            }
+            self.0 = true;
+            event_loop.exit();
+        }
+        fn window_event(
+            &mut self,
+            _: &ActiveEventLoop,
+            _: winit::window::WindowId,
+            _: winit::event::WindowEvent,
+        ) {
+        }
+    }
+    let mut trial = Trial(false);
+    EventLoop::builder()
+        .with_any_thread(true)
+        .build()
+        .expect("event loop")
+        .run_app(&mut trial)
+        .expect("GPU check");
+    assert!(trial.0);
 }

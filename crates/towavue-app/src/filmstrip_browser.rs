@@ -56,6 +56,7 @@ pub(super) struct Browser {
     pub owner: Option<crate::thumbnail_menu::Owner>,
     pub navigation: [bool; 2],
     pub current_path: Option<PathBuf>,
+    pub notice: Option<String>,
     tab: Option<towavue_core::TabId>,
     views: std::collections::BTreeMap<towavue_core::TabId, View>,
     search_focused: bool,
@@ -253,9 +254,12 @@ impl Browser {
                 ui.painter().rect_filled(header, 0.0, chrome::BACKGROUND);
                 ui.style_mut().override_font_id = Some(egui::FontId::proportional(chrome::TEXT_LG));
                 let content = header.shrink(3.0);
-                let filter_width = crate::browser_controls::filter_size(ui, &self.counts.values)
-                    .x
-                    .min((content.width() - 209.0).max(0.0));
+                let filter_width = crate::browser_controls::filter_width(
+                    ui,
+                    &self.counts.values,
+                    &mut self.filter,
+                    (content.width() - 209.0).max(0.0),
+                );
                 let filters = Rect::from_min_max(
                     egui::pos2(content.right() - filter_width, content.top()),
                     content.max,
@@ -321,7 +325,10 @@ impl Browser {
                 if !crate::browser_controls::search_active(ui, search_id, &self.query) {
                     let left = search.left() + 26.0 + chrome::TAB_PADDING;
                     let path = self.current_path.clone();
-                    let name = path.as_deref().map(crate::display_name);
+                    let name = self
+                        .notice
+                        .clone()
+                        .or_else(|| path.as_deref().map(crate::display_name));
                     let name_width = name
                         .as_ref()
                         .map_or(0.0, |name| crate::status_bar::width(ui, name))
@@ -329,43 +336,41 @@ impl Browser {
                     let address = Rect::from_min_max(
                         egui::pos2(left, search.top()),
                         egui::pos2(
-                            (search.right() - name_width - 20.0).max(left),
+                            (search.right() - name_width - chrome::TAB_PADDING - 2.0).max(left),
                             search.bottom(),
                         ),
                     );
                     let end = self.address_bar(ui, address, &mut target);
-                    if let (Some(path), Some(name)) = (path, name) {
-                        let slash = Rect::from_min_size(
-                            egui::pos2(end + 2.0, search.top()),
-                            egui::vec2(16.0, 24.0),
-                        );
-                        ui.painter().text(
-                            slash.center(),
-                            egui::Align2::CENTER_CENTER,
-                            "/",
-                            egui::FontId::proportional(chrome::TEXT_LG),
-                            chrome::MUTED,
-                        );
+                    if let Some(name) = name {
                         let slot = Rect::from_min_size(
-                            slash.right_top() + egui::vec2(2.0, 0.0),
+                            egui::pos2(end + chrome::TAB_PADDING, search.top()),
                             egui::vec2(name_width, 24.0),
                         );
                         let response = crate::status_bar::item_at(
                             ui,
                             slot,
-                            egui::RichText::new(name).size(chrome::TEXT_LG),
-                            true,
+                            if self.notice.is_some() {
+                                egui::RichText::new(name)
+                                    .size(chrome::TEXT_LG)
+                                    .color(chrome::FOREGROUND)
+                            } else {
+                                egui::RichText::new(name).size(chrome::TEXT_LG)
+                            },
+                            self.notice.is_none(),
                         );
-                        let mut menu_actions = Vec::new();
-                        crate::status_bar::path_menu(
-                            ui,
-                            &response,
-                            &path,
-                            self.owner,
-                            &mut menu_actions,
-                        );
-                        if let Some(crate::UiAction::ThumbnailMenu(intent)) = menu_actions.pop() {
-                            target = Some(Action::Menu(intent));
+                        if let Some(path) = path.filter(|_| self.notice.is_none()) {
+                            let mut menu_actions = Vec::new();
+                            crate::status_bar::path_menu(
+                                ui,
+                                &response,
+                                &path,
+                                self.owner,
+                                &mut menu_actions,
+                            );
+                            if let Some(crate::UiAction::ThumbnailMenu(intent)) = menu_actions.pop()
+                            {
+                                target = Some(Action::Menu(intent));
+                            }
                         }
                     }
                 }
@@ -479,10 +484,7 @@ impl Browser {
                 })
             .max(rect.left());
             let name = Rect::from_min_max(rect.min, egui::pos2(split, rect.bottom()));
-            let arrow = Rect::from_center_size(
-                egui::pos2(rect.right() - 8.0, rect.center().y),
-                Vec2::splat(16.0),
-            );
+            let arrow = Rect::from_min_max(egui::pos2(split, rect.top()), rect.max);
             let label = crate::folder_navigation::folder_name(path);
             let name_response = ui
                 .push_id(("crumb", path), |ui| {
@@ -531,15 +533,15 @@ impl Browser {
                 if arrow_response.clicked() {
                     self.menu_open = Some(popup_id);
                 }
-                if arrow_response.hovered() {
-                    ui.painter()
-                        .rect_filled(arrow, chrome::RADIUS_XS, chrome::ACTIVE_TAB);
-                }
                 crate::fluent::paint(
                     ui,
                     arrow,
-                    crate::fluent::Kind::ChevronUp,
-                    if arrow_response.hovered() {
+                    if egui::Popup::is_id_open(ui.ctx(), popup_id) {
+                        crate::fluent::Kind::ChevronUp
+                    } else {
+                        crate::fluent::Kind::ChevronRight
+                    },
+                    if egui::Popup::is_id_open(ui.ctx(), popup_id) || arrow_response.hovered() {
                         chrome::FOREGROUND
                     } else {
                         chrome::MUTED

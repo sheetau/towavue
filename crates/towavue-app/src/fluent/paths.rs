@@ -903,7 +903,7 @@ pub(super) fn paths(kind: Kind) -> Vec<Path> {
             path.close();
             path.finish().expect("pinned Fluent path")
         }],
-        Kind::ChevronUp => vec![{
+        Kind::ChevronUp | Kind::ChevronRight => vec![{
             let mut path = PathBuilder::new();
             path.move_to(3.14645, 10.3536);
             path.cubic_to(3.34171, 10.5488, 3.65829, 10.5488, 3.85355, 10.3536);

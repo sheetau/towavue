@@ -105,7 +105,7 @@ fn status_access_uses_commands_and_path_menu_ignores_notifications() {
         click(&mut app, format)
             .1
             .iter()
-            .any(|action| matches!(action, UiAction::StatusPalette("resize")))
+            .any(|action| matches!(action, UiAction::StatusPalette("resize / resample")))
     );
     let path = target(&output, "Pictures\\photo.png");
     click(&mut app, path);
@@ -159,4 +159,34 @@ fn gallery_search_replaces_status_content_without_a_media_header() {
     );
     click(&mut app, close);
     assert!(app.gallery_search.is_empty());
+}
+
+#[test]
+fn status_hover_keeps_an_antialias_margin_outside_both_edges() {
+    for density in [1.0, 1.25, 2.0] {
+        let context = fonts::test_context();
+        context.set_pixels_per_point(density);
+        context.global_style_mut(chrome::style);
+        let rect = egui::Rect::from_min_size(egui::pos2(10.3, 10.0), egui::vec2(70.3, 24.0));
+        let draw = || {
+            context.run_ui(
+                egui::RawInput {
+                    events: vec![egui::Event::PointerMoved(rect.center())],
+                    ..Default::default()
+                },
+                |ui| {
+                    item_at(ui, rect, "", true);
+                },
+            )
+        };
+        draw();
+        let output = draw();
+        let shape = output
+            .shapes
+            .iter()
+            .find(|shape| matches!(&shape.shape,egui::Shape::Rect(r) if r.fill==chrome::ACTIVE_TAB))
+            .expect("hover fill");
+        assert!(shape.clip_rect.right() >= rect.right() + 0.99 / density);
+        assert!(shape.clip_rect.left() <= rect.left() - 0.99 / density);
+    }
 }

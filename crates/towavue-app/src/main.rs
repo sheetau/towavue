@@ -7075,6 +7075,15 @@ where
                 }
                 let enabled = enabled
                     && !matches!(self.state, PlaybackState::Loading | PlaybackState::Faulted);
+                let grid_layout = layout.with_source_grid(
+                    self.session
+                        .as_ref()
+                        .map_or(MediaTime::ZERO, PlaybackSession::source_video_grid_origin),
+                    self.session
+                        .as_ref()
+                        .filter(|_| self.media_kind == Some(MediaKind::Video))
+                        .and_then(PlaybackSession::timeline),
+                );
                 let result = time_selection::show_in_view(
                     ui,
                     &response,
@@ -7083,11 +7092,11 @@ where
                     self.time_selection,
                     self.session.as_ref().and_then(PlaybackSession::timeline),
                     enabled,
-                    layout,
+                    grid_layout,
                 );
                 timeline_view::paint(
                     ui,
-                    layout,
+                    grid_layout,
                     fps,
                     result.display_position,
                     result.display_selection,
@@ -7515,7 +7524,7 @@ where
             }
             UiAction::StatusPalette(query) => {
                 if !self.modal_input_blocked() {
-                    if query == "resize"
+                    if query == "resize / resample"
                         && self.media_kind == Some(MediaKind::Video)
                         && !self.timeline_open
                     {
@@ -11923,6 +11932,7 @@ where
             });
             self.filmstrip_browser.sync_folder(folder, context);
             self.filmstrip_browser.current_path = self.path.clone();
+            self.filmstrip_browser.notice = self.status_notice();
             projection_changed = self.filmstrip_browser.project(source).1;
             if let Some(target) = self
                 .filmstrip_browser
@@ -16373,8 +16383,7 @@ mod tests {
                         .iter()
                         .filter_map(|shape| match &shape.shape {
                             egui::Shape::LineSegment { points, stroke }
-                                if (stroke.color == chrome::BORDER
-                                    || (timeline && stroke.color == chrome::FOREGROUND))
+                                if stroke.color == chrome::BORDER
                                     && points[0].x == 0.0
                                     && points[1].x == width
                                     && points[0].y == points[1].y =>

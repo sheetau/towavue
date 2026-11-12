@@ -87,6 +87,7 @@ pub(super) fn panel_resize_enabled(ui: &egui::Ui, panel: egui::Id) -> bool {
 pub(super) fn show_panel<R>(
     root: &mut egui::Ui,
     panel: egui::Id,
+    preferred_height: &mut f32,
     enabled: bool,
     margin: egui::Margin,
     content: impl FnOnce(&mut egui::Ui) -> R,
@@ -99,8 +100,9 @@ pub(super) fn show_panel<R>(
         cancel_panel_resize(root.ctx(), panel);
     }
     let resizable = enabled && panel_resize_enabled(root, panel);
-    root.visuals_mut().widgets.active.fg_stroke.color = chrome::FOREGROUND;
-    root.visuals_mut().widgets.hovered.fg_stroke.color = chrome::FOREGROUND;
+    let stroke = egui::Stroke::new(1.0 / root.ctx().pixels_per_point(), chrome::FOREGROUND);
+    root.visuals_mut().widgets.active.fg_stroke = stroke;
+    root.visuals_mut().widgets.hovered.fg_stroke = stroke;
     let anchor_id = panel.with("resize-anchor");
     let response = root.ctx().read_response(panel.with("__resize"));
     let live = resizable
@@ -108,8 +110,7 @@ pub(super) fn show_panel<R>(
             .as_ref()
             .is_some_and(|r| r.dragged() || r.drag_stopped());
     let mut builder = egui::Panel::bottom(panel)
-        .default_size(96.0)
-        .size_range(64.0_f32.min(maximum)..=maximum)
+        .exact_size(preferred_height.clamp(64.0_f32.min(maximum), maximum))
         .resizable(resizable);
     if live {
         if let Some(pointer) = response.and_then(|r| r.interact_pointer_pos()) {
@@ -117,7 +118,7 @@ pub(super) fn show_panel<R>(
                 .input(|input| input.pointer.press_origin())
                 .unwrap_or(pointer);
             let initial = egui::containers::panel::PanelState::load(root.ctx(), panel)
-                .map_or(96.0, |state| state.outer_rect.height());
+                .map_or(*preferred_height, |state| state.outer_rect.height());
             let (start, height) = root.ctx().data_mut(|data| {
                 *data.get_temp_mut_or_insert_with(anchor_id, || (origin.y, initial))
             });
@@ -146,6 +147,26 @@ pub(super) fn show_panel<R>(
             content(ui)
         });
     root.set_style(original);
+    // The fixed live size is an implementation detail, not a one-way resize limit.
+    if resizable
+        && root
+            .ctx()
+            .read_response(panel.with("__resize"))
+            .is_some_and(|response| response.hovered() || response.dragged())
+    {
+        let height = result.response.rect.height();
+        root.ctx()
+            .set_cursor_icon(if height <= 64.0_f32.min(maximum) {
+                egui::CursorIcon::ResizeNorth
+            } else if height >= maximum {
+                egui::CursorIcon::ResizeSouth
+            } else {
+                egui::CursorIcon::ResizeVertical
+            });
+    }
+    if live && !root.input(|input| input.pointer.primary_down()) {
+        *preferred_height = result.response.rect.height().max(64.0);
+    }
     if !enabled {
         root.painter()
             .rect_filled(result.response.rect, 0.0, Color32::from_black_alpha(128));

@@ -3,6 +3,18 @@ use std::os::windows::process::CommandExt;
 use towavue_core::{TimeRange, TimelineEdit};
 use winit::platform::windows::EventLoopBuilderExtWindows;
 
+fn region_vertices(mesh: &egui::Mesh, start: f32, end: f32) -> Vec<egui::epaint::Vertex> {
+    mesh.triangles()
+        .map(|indices| indices.map(|i| mesh.vertices[i as usize]))
+        .filter(|vertices| {
+            vertices
+                .iter()
+                .all(|v| v.uv.x >= start - 1e-6 && v.uv.x <= end + 1e-6)
+        })
+        .flatten()
+        .collect()
+}
+
 fn time(ms: i64) -> MediaTime {
     MediaTime::from_nanoseconds(ms * 1_000_000)
 }
@@ -680,27 +692,18 @@ fn gain_drag_updates_waveform_mesh_before_commit_without_reloading_pixels() {
             let generation = app.generation;
             let (output, actions, dragging) = frame(&mut app, vec![egui::Event::PointerMoved(end)]);
             assert!(actions.is_empty());
-            assert_eq!(
-                dragging.vertices.len(),
-                12,
-                "split the selected interval before committing"
+            let vertices = region_vertices(&dragging, 0.2, 0.6);
+            assert!(
+                !vertices.is_empty(),
+                "the selected source interval remains visible"
             );
-            let selected = egui::Rect::from_points(
-                &dragging.vertices[4..8]
-                    .iter()
-                    .map(|vertex| vertex.pos)
-                    .collect::<Vec<_>>(),
-            );
-            let selected_uv = egui::Rect::from_points(
-                &dragging.vertices[4..8]
-                    .iter()
-                    .map(|vertex| vertex.uv)
-                    .collect::<Vec<_>>(),
-            );
+            let selected =
+                egui::Rect::from_points(&vertices.iter().map(|v| v.pos).collect::<Vec<_>>());
+            let selected_uv =
+                egui::Rect::from_points(&vertices.iter().map(|v| v.uv).collect::<Vec<_>>());
             assert!((selected.height() / selected_uv.height() / rect.height() - 2.0).abs() < 0.001);
-            assert_eq!(
-                selected.height(),
-                rect.height(),
+            assert!(
+                (selected.height() - rect.height()).abs() < 1e-3,
                 "amplified geometry stays inside the viewport"
             );
             assert!(
@@ -1170,45 +1173,42 @@ fn run_app_trial(root: PathBuf, audio: bool) {
                     .iter()
                     .any(|(_, node)| node.label().is_some_and(|label| label.starts_with("Trim ")))
             );
-            let regions: Vec<_> = output
+            let meshes: Vec<_> = output
                 .shapes
                 .iter()
                 .filter_map(|shape| match &shape.shape {
-                    egui::Shape::Mesh(mesh) if mesh.texture_id == texture => {
-                        Some(mesh.vertices.as_chunks::<4>().0.iter())
-                    }
+                    egui::Shape::Mesh(mesh) if mesh.texture_id == texture => Some(mesh),
                     _ => None,
                 })
-                .flatten()
                 .collect();
-            assert_eq!(
-                regions.len(),
-                if self.audio { 0 } else { 3 },
-                "only audible retained waveform source regions"
-            );
-            let uv: Vec<_> = regions
-                .iter()
-                .map(|vertices| {
-                    (
-                        vertices
-                            .iter()
-                            .map(|vertex| vertex.uv.x)
-                            .fold(f32::INFINITY, f32::min),
-                        vertices
-                            .iter()
-                            .map(|vertex| vertex.uv.x)
-                            .fold(f32::NEG_INFINITY, f32::max),
-                    )
-                })
-                .collect();
-            assert_eq!(
-                uv,
-                if self.audio {
-                    vec![]
-                } else {
-                    vec![(0.0, 0.25), (0.5, 0.75), (0.75, 1.0)]
+            if self.audio {
+                assert!(meshes.is_empty(), "muted source has no waveform triangles");
+            } else {
+                let expected = [(0.0, 0.25), (0.5, 0.75), (0.75, 1.0)];
+                for mesh in &meshes {
+                    for indices in mesh.triangles() {
+                        assert!(
+                            expected.iter().any(|(start, end)| indices.iter().all(|i| {
+                                let u = mesh.vertices[*i as usize].uv.x;
+                                u >= *start - 1e-6 && u <= *end + 1e-6
+                            })),
+                            "a triangle cannot bridge a deleted source interval"
+                        );
+                    }
                 }
-            );
+                for (start, end) in expected {
+                    let vertices: Vec<_> = meshes
+                        .iter()
+                        .flat_map(|mesh| region_vertices(mesh, start, end))
+                        .collect();
+                    let uv =
+                        egui::Rect::from_points(&vertices.iter().map(|v| v.uv).collect::<Vec<_>>());
+                    assert!(
+                        (uv.left() - start).abs() < 1e-6 && (uv.right() - end).abs() < 1e-6,
+                        "retained source interval {start}..{end}: {uv:?}"
+                    );
+                }
+            }
             assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text().contains("0:03:500 / 0:04:000"))));
             let (_, actions) = render(
                 &mut app,
@@ -1222,13 +1222,16 @@ fn run_app_trial(root: PathBuf, audio: bool) {
                     },
                 )],
             );
+            // This generated video is 30 fps: 3.25 s lies halfway between
+            // frames 97 and 98, so the visible frame grid selects frame 98.
+            let snapped_seek = MediaTime::from_nanoseconds(3_266_666_667);
             assert!(
-                matches!(actions.as_slice(), [UiAction::Seek(position)] if *position == time(3250))
+                matches!(actions.as_slice(), [UiAction::Seek(position)] if *position == snapped_seek)
             );
             for action in actions {
                 app.handle_ui_action(action);
             }
-            assert_eq!(app.current_position(), time(3250));
+            assert_eq!(app.current_position(), snapped_seek);
             app.seek_to(time(3500));
             let generation = app.generation;
             app.push_edit(EditOperation::SetVolume(if self.audio { 0.0 } else { 0.5 }));

@@ -34,6 +34,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             2 => view_resize::Mode::KeepScale,
             _ => view_resize::Mode::Fit,
         };
+        self.timeline_height = f32::from(store.value(Key::TimelineHeight));
         self.volume_step_percent = store.value(Key::VolumeStep) as u8;
         self.nearest_images = store.value(Key::Nearest) != 0;
         self.high_quality_minification = store.value(Key::Minification) != 0;
@@ -61,6 +62,26 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         };
         self.prefer_hardware_encode = store.value(Key::HardwareEncode) != 0;
         self.view_preferences = Some(store);
+    }
+
+    pub(super) fn remember_timeline_height(&mut self, height: f32) {
+        if self.timeline_height == height {
+            return;
+        }
+        self.timeline_height = height;
+        if let Some(store) = &self.view_preferences
+            && let Err(error) = store.remember(
+                Key::TimelineHeight,
+                height.round().clamp(64.0, 16384.0) as u16,
+            )
+        {
+            self.set_status(
+                towavue_core::localization::formatted::view_preference_failed(
+                    self.language(),
+                    &towavue_runtime_windows::io_error_message(&error, self.language()),
+                ),
+            );
+        }
     }
 
     // Only accepted preference commands reach this hook. Activation, restored

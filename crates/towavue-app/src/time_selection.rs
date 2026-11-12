@@ -112,12 +112,17 @@ pub(super) fn show_in_view(
     let visible = rect;
     let seconds = duration.as_seconds_f64();
     let at = |x: f32| {
-        MediaTime::from_nanoseconds(
+        layout.quantize(MediaTime::from_nanoseconds(
             ((layout.view.start + layout.view.span * f64::from(crate::seekbar::ratio(rect, x)))
                 * 1e9)
                 .round()
                 .clamp(0.0, duration.as_nanoseconds() as f64) as i64,
-        )
+        ))
+    };
+    let raw_at = |x: f32| {
+        layout.view.start
+            + layout.view.span
+                * ((f64::from(x) - f64::from(rect.left())) / f64::from(rect.width().max(1.0)))
     };
     let x_at = |time: MediaTime| layout.view.x(rect, time.as_seconds_f64());
     let mut output = Output::default();
@@ -277,18 +282,30 @@ pub(super) fn show_in_view(
             ui.ctx().data_mut(|data| {
                 data.insert_temp(
                     mode_id,
-                    (choose(origin, drag.modifiers, drag.secondary), position),
+                    (
+                        choose(origin, drag.modifiers, drag.secondary),
+                        position,
+                        raw_at(origin.x),
+                    ),
                 );
             });
         }
-        let (mut mode, snap_head) = ui.ctx().data_mut(|data| {
+        let (mut mode, snap_head, origin_time) = ui.ctx().data_mut(|data| {
             *data.get_temp_mut_or_insert_with(mode_id, || {
-                (choose(origin, drag.modifiers, drag.secondary), position)
+                (
+                    choose(origin, drag.modifiers, drag.secondary),
+                    position,
+                    raw_at(origin.x),
+                )
             })
         });
         // A selection press may seek immediately. Keep the original CTI as the
         // magnet for this gesture, with a small screen-space radius and no latch.
-        let snap_head = snap_head.clamp(MediaTime::ZERO, duration);
+        let snap_head = layout.quantize(snap_head.clamp(MediaTime::ZERO, duration));
+        let origin_point = layout.quantize(MediaTime::from_nanoseconds(
+            (origin_time * 1e9).round() as i64,
+        ));
+        let drag_delta = ((raw_at(pointer.x) - origin_time) * 1e9).round() as i64;
         let snap = |point, x: f32| {
             if (x - x_at(snap_head)).abs() <= 4.0 {
                 snap_head
@@ -296,9 +313,6 @@ pub(super) fn show_in_view(
                 point
             }
         };
-        if matches!(mode, Gesture::Seek) {
-            layout.suppress_hover(ui.ctx());
-        }
         let snap_selection = |point, x: f32| {
             if ui.input(|input| input.modifiers.shift)
                 && let Some(range) = selection
@@ -308,7 +322,7 @@ pub(super) fn show_in_view(
                     .min_by(|a, b| (x - x_at(*a)).abs().total_cmp(&(x - x_at(*b)).abs()))
                     .expect("two selection edges");
                 if (x - x_at(edge)).abs() <= 5.0 {
-                    return edge;
+                    return layout.quantize(edge);
                 }
             }
             point
@@ -324,7 +338,13 @@ pub(super) fn show_in_view(
                 Gesture::Select
             };
             ui.ctx()
-                .data_mut(|data| data.insert_temp(mode_id, (mode, snap_head)));
+                .data_mut(|data| data.insert_temp(mode_id, (mode, snap_head, origin_time)));
+        }
+        if matches!(
+            mode,
+            Gesture::Seek | Gesture::Select | Gesture::Resize(..) | Gesture::Move(_)
+        ) {
+            layout.suppress_hover(ui.ctx());
         }
         let cursor_mode = if matches!(mode, Gesture::Move(_)) && !drag.dragging {
             choose(origin, drag.modifiers, false)
@@ -335,17 +355,45 @@ pub(super) fn show_in_view(
         if drag.dragging
             && let Gesture::Move(range) = mode
         {
-            let delta = (f64::from(pointer.x - origin.x) / f64::from(rect.width().max(1.0))
-                * layout.view.span
-                * 1e9)
-                .round() as i64;
+            let mut delta = layout
+                .quantize(MediaTime::from_nanoseconds(
+                    range.start().as_nanoseconds().saturating_add(drag_delta),
+                ))
+                .as_nanoseconds()
+                - range.start().as_nanoseconds();
+            if ui.input(|input| input.modifiers.shift) {
+                let edge = [range.start(), range.end()]
+                    .into_iter()
+                    .min_by(|a, b| {
+                        (x_at(MediaTime::from_nanoseconds(a.as_nanoseconds() + delta))
+                            - x_at(snap_head))
+                        .abs()
+                        .total_cmp(
+                            &(x_at(MediaTime::from_nanoseconds(b.as_nanoseconds() + delta))
+                                - x_at(snap_head))
+                            .abs(),
+                        )
+                    })
+                    .expect("two selection edges");
+                if (x_at(MediaTime::from_nanoseconds(edge.as_nanoseconds() + delta))
+                    - x_at(snap_head))
+                .abs()
+                    <= 5.0
+                {
+                    delta = snap_head.as_nanoseconds() - edge.as_nanoseconds();
+                }
+            }
             let delta = delta.clamp(
                 -range.start().as_nanoseconds(),
                 duration.as_nanoseconds() - range.end().as_nanoseconds(),
             );
             preview = TimeRange::new(
-                MediaTime::from_nanoseconds(range.start().as_nanoseconds() + delta),
-                MediaTime::from_nanoseconds(range.end().as_nanoseconds() + delta),
+                layout.quantize(MediaTime::from_nanoseconds(
+                    range.start().as_nanoseconds() + delta,
+                )),
+                layout.quantize(MediaTime::from_nanoseconds(
+                    range.end().as_nanoseconds() + delta,
+                )),
             );
             if drag.released && preview != selection {
                 output.selection = Some(preview);
@@ -386,35 +434,33 @@ pub(super) fn show_in_view(
             && let Gesture::Resize(range, start) = mode
         {
             let endpoint = if start { range.start() } else { range.end() };
-            let delta = (f64::from(pointer.x) - f64::from(origin.x))
-                / f64::from(rect.width().max(1.0))
-                * layout.view.span
-                * 1e9;
-            let point = MediaTime::from_nanoseconds(
-                ((endpoint.as_nanoseconds() as f64 + delta).round() as i64)
+            let point = layout.quantize(MediaTime::from_nanoseconds(
+                endpoint
+                    .as_nanoseconds()
+                    .saturating_add(drag_delta)
                     .clamp(0, duration.as_nanoseconds()),
-            );
-            let point = snap(point, x_at(endpoint) + pointer.x - origin.x);
+            ));
+            let point = snap(point, x_at(point));
             preview = if start {
                 TimeRange::new(
-                    point.min(MediaTime::from_nanoseconds(
-                        range.end().as_nanoseconds() - 1,
-                    )),
-                    range.end(),
+                    layout.quantize(point.min(MediaTime::from_nanoseconds(
+                        range.end().as_nanoseconds() - layout.frame_step(),
+                    ))),
+                    layout.quantize(range.end()),
                 )
             } else {
                 TimeRange::new(
-                    range.start(),
-                    point.max(MediaTime::from_nanoseconds(
-                        range.start().as_nanoseconds() + 1,
-                    )),
+                    layout.quantize(range.start()),
+                    layout.quantize(point.max(MediaTime::from_nanoseconds(
+                        range.start().as_nanoseconds() + layout.frame_step(),
+                    ))),
                 )
             };
             if drag.released && preview != selection {
                 output.selection = Some(preview);
             }
         } else if drag.dragging && matches!(mode, Gesture::Select) {
-            let a = snap(at(origin.x), origin.x);
+            let a = snap(origin_point, x_at(origin_point));
             let b = snap(at(pointer.x), pointer.x);
             preview = TimeRange::new(a.min(b), a.max(b));
             head = a.min(b);
@@ -429,7 +475,7 @@ pub(super) fn show_in_view(
             // A completed click still seeks; a horizontal drag becomes selection.
             if !matches!(mode, Gesture::Band(..)) || drag.released {
                 head = if matches!(mode, Gesture::Select) {
-                    snap(at(origin.x), origin.x)
+                    snap(origin_point, x_at(origin_point))
                 } else if matches!(mode, Gesture::Seek) {
                     snap_selection(at(pointer.x), pointer.x)
                 } else {
@@ -452,18 +498,35 @@ pub(super) fn show_in_view(
             // Forward selection keeps the CTI at the press seek. Retain its native
             // frame, including when a reverse drag crosses back over the origin.
             output.scrub_original_frame =
-                matches!(mode, Gesture::Select) && head == snap(at(origin.x), origin.x);
+                matches!(mode, Gesture::Select) && head == snap(origin_point, x_at(origin_point));
         }
+        let ruler_time = match mode {
+            Gesture::Resize(_, start) if drag.dragging => {
+                preview.map(|range| if start { range.start() } else { range.end() })
+            }
+            Gesture::Select if drag.dragging => preview
+                .filter(|_| at(pointer.x) != head)
+                .map(|range| range.end()),
+            _ => None,
+        };
+        let auto_scroll = drag.dragging
+            && !drag.released
+            && matches!(
+                mode,
+                Gesture::Seek | Gesture::Select | Gesture::Resize(..) | Gesture::Move(_)
+            );
+        layout.drag_feedback(ui.ctx(), auto_scroll, ruler_time);
         // A discarded UI pass must not paint the pre-gesture CTI/selection again.
         ui.ctx()
             .data_mut(|data| data.insert_temp(preview_id, (frame, head, preview)));
         if drag.released {
             ui.ctx()
-                .data_mut(|data| data.remove::<(Gesture, MediaTime)>(mode_id));
+                .data_mut(|data| data.remove::<(Gesture, MediaTime, f64)>(mode_id));
         }
     } else {
+        layout.drag_feedback(ui.ctx(), false, None);
         ui.ctx()
-            .data_mut(|data| data.remove::<(Gesture, MediaTime)>(mode_id));
+            .data_mut(|data| data.remove::<(Gesture, MediaTime, f64)>(mode_id));
     }
     if let Some(value) = crate::seekbar::value_input(
         response,
@@ -473,7 +536,8 @@ pub(super) fn show_in_view(
         5.0,
         enabled,
     ) {
-        output.seek = Some(crate::media_time(std::time::Duration::from_secs_f64(value)));
+        output.seek =
+            Some(layout.quantize(crate::media_time(std::time::Duration::from_secs_f64(value))));
     }
     let painter = ui.painter().with_clip_rect(visible);
     if let Some(range) = preview {
@@ -585,7 +649,8 @@ pub(super) fn show_in_view(
             0.1,
             editable,
         ) {
-            let value = crate::media_time(std::time::Duration::from_secs_f64(value));
+            let value =
+                layout.quantize(crate::media_time(std::time::Duration::from_secs_f64(value)));
             let candidate = if start {
                 TimeRange::new(value, selection.map_or(duration, |range| range.end()))
             } else {

@@ -6,10 +6,8 @@ const MARGIN: f32 = 8.0;
 const FRAME_SPACE: f32 = 12.0;
 const MAX_CONTENT_WIDTH: f32 = 400.0;
 
-/// Callers supply the primary action first. Paint cancellation on the left and
-/// the primary action on the right, returning responses in the supplied order.
+/// Paint actions and return responses in the supplied order: primary, then cancel.
 pub fn modal_actions(ui: &mut Ui, actions: &[(&str, bool)]) -> Vec<egui::Response> {
-    let actions: Vec<_> = actions.iter().rev().copied().collect();
     super::flat_buttons(ui);
     ui.spacing_mut().item_spacing = egui::vec2(super::PADDING as f32, super::ITEM_GAP);
     ui.spacing_mut().interact_size.y = super::CONTROL_HEIGHT;
@@ -91,7 +89,6 @@ pub fn modal_actions(ui: &mut Ui, actions: &[(&str, bool)]) -> Vec<egui::Respons
             x += widths[index] + gap.x;
         }
     }
-    responses.reverse();
     responses
 }
 
@@ -291,7 +288,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn footer_rows_align_right_with_primary_last_and_preserve_response_order() {
+    fn footer_rows_align_right_with_primary_first_and_preserve_response_order() {
         for density in [1.0, 1.25, 2.0] {
             for width in [140.0, 220.0, 400.0] {
                 let context = crate::fonts::test_context();
@@ -313,7 +310,7 @@ mod tests {
                         );
                         assert!(!buttons[0].enabled());
                         assert!(buttons[1].enabled());
-                        let displayed: Vec<_> = buttons.iter().rev().collect();
+                        let displayed: Vec<_> = buttons.iter().collect();
                         for (index, button) in displayed.iter().enumerate() {
                             assert!(button.rect.left() >= body.left() - 1.0 / density);
                             assert!(button.rect.right() <= body.right() + 1.0 / density);
@@ -334,7 +331,7 @@ mod tests {
                         }
                         assert!(
                             (ui.min_rect().bottom()
-                                - buttons.first().expect("footer").rect.bottom()
+                                - buttons.last().expect("footer").rect.bottom()
                                 - 1.0)
                                 .abs()
                                 <= 1.0 / density

@@ -79,6 +79,48 @@ fn button(pos: egui::Pos2, pressed: bool) -> egui::Event {
     }
 }
 
+#[test]
+fn accepted_height_survives_tabs_reopening_and_a_fresh_preference_store() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "timeline_edit::panel_tests::accepted_height_survives_tabs_reopening_and_a_fresh_preference_store",
+    ) else {
+        return;
+    };
+    let path = root.join("timeline-viewing.conf");
+    let store = Arc::new(
+        towavue_runtime_windows::ViewPreferences::open(path.clone(), |e| panic!("{e}"))
+            .expect("store"),
+    );
+    let mut app = setup(MediaKind::Video, 1.25);
+    app.restore_view_preferences(Some(store.clone()));
+    let end = rect(&app).center_top() + egui::vec2(0.0, 16.0);
+    drag(&mut app, end);
+    frame(&mut app, vec![button(end, false)], true);
+    assert!((app.timeline_height - 80.0).abs() <= 1.0);
+    let preferred = app.timeline_height;
+    app.timeline_open = false;
+    frame(&mut app, vec![], false);
+    app.tabs
+        .open_new(PathBuf::from("other-unopened.mp4"), MediaKind::Video);
+    app.timeline_open = true;
+    for _ in 0..3 {
+        frame(&mut app, vec![], false);
+    }
+    assert!((rect(&app).height() - preferred).abs() <= 1.0);
+    drop(app);
+    drop(store);
+    let store = Arc::new(
+        towavue_runtime_windows::ViewPreferences::open(path, |e| panic!("{e}"))
+            .expect("reopened store"),
+    );
+    let mut app = setup(MediaKind::Audio, 2.0);
+    app.restore_view_preferences(Some(store));
+    for _ in 0..3 {
+        frame(&mut app, vec![], false);
+    }
+    assert!((rect(&app).height() - preferred).abs() <= 1.0);
+}
+
 fn drag(app: &mut App, end: egui::Pos2) {
     let start = rect(app).center_top();
     for events in [
@@ -149,6 +191,7 @@ fn resize_preserves_grab_offset_and_disabled_panel_uses_one_overlay() {
         show_panel(
             ui,
             egui::Id::new("disabled-overlay"),
+            &mut 96.0,
             false,
             egui::Margin::ZERO,
             |ui| {

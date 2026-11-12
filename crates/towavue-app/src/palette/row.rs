@@ -101,10 +101,10 @@ impl RowActions {
         let mut slot = |visible: bool| {
             visible.then(|| {
                 let rect = egui::Rect::from_center_size(
-                    egui::pos2(right - crate::chrome::ROW_HEIGHT * 0.5, row.center().y),
-                    egui::Vec2::splat(crate::chrome::ROW_HEIGHT),
+                    egui::pos2(right - crate::chrome::ICON_SIZE * 0.5, row.center().y),
+                    egui::Vec2::splat(crate::chrome::ICON_SIZE),
                 );
-                right = rect.left() - crate::chrome::ITEM_GAP;
+                right = rect.left() - crate::chrome::PADDING as f32;
                 rect
             })
         };
@@ -166,7 +166,10 @@ pub(super) fn row_icon(ui: &mut egui::Ui, rect: egui::Rect, glyph: char) -> egui
             ui,
             rect,
             egui::Button::new(
-                egui::RichText::new(glyph.to_string()).font(crate::fonts::icon_font()),
+                egui::RichText::new(glyph.to_string())
+                    .font(crate::fonts::icon_font())
+                    .atom_size(egui::Vec2::splat(crate::chrome::ICON_SIZE))
+                    .atom_align(egui::Align2::CENTER_CENTER),
             )
             .frame(false),
         )
@@ -185,6 +188,57 @@ pub(super) fn overlay_scroll_bar(ui: &mut egui::Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn options_caret_uses_only_frame_button_and_input_insets() {
+        for density in [1.0, 1.25, 2.0] {
+            let context = crate::fonts::test_context();
+            context.set_pixels_per_point(density);
+            context.global_style_mut(crate::chrome::style);
+            let mut palette = CommandPalette::default();
+            palette.begin_options(
+                CommandId::CycleVolumeStep,
+                localization::Language::English,
+                (None, 0),
+                vec![],
+            );
+            let mut output = egui::FullOutput::default();
+            for _ in 0..4 {
+                output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(800.0, 500.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |_| {
+                        palette.show(
+                            &context,
+                            CommandContext {
+                                palette_open: true,
+                                ..Default::default()
+                            },
+                            &ShortcutBindings::default(),
+                            0.0,
+                        );
+                    },
+                );
+            }
+            let panel = context
+                .memory(|memory| memory.area_rect(egui::Id::new("command-palette")))
+                .expect("palette frame");
+            let caret = output
+                .platform_output
+                .ime
+                .expect("focused query")
+                .cursor_rect;
+            assert!(
+                (caret.center().x - panel.left() - 27.0).abs() <= 1.5 / density,
+                "caret {caret:?}, panel {panel:?}, density {density}"
+            );
+        }
+    }
 
     #[test]
     fn row_states_keep_selection_hover_text_and_keycaps_distinct() {

@@ -118,6 +118,7 @@ mod timeline_edit;
 mod timeline_input;
 mod timeline_menu;
 mod timeline_view;
+mod timeline_waveform_clip;
 mod track_drag;
 mod trim;
 #[cfg(test)]
@@ -1265,6 +1266,7 @@ struct Application<N> {
     thumbnail_worker: LatestTask,
     video_sheets: video_sheets::VideoSheets,
     frame_steps: frame_step::FrameSteps,
+    timeline_height: f32,
     held_speed: Option<hold_speed::Held>,
     space_hold: Option<hold_speed::keyboard::Press>,
     timeline_open: bool,
@@ -1587,6 +1589,7 @@ where
             held_speed: None,
             space_hold: None,
             timeline_open: false,
+            timeline_height: 96.0,
             waveform: None,
             waveform_detail: waveform_detail::Detail::default(),
             media_duration: None,
@@ -7542,9 +7545,11 @@ where
         }
         let panel = self.timeline_panel_id();
         let enabled = !self.modal_input_blocked() && !self.filmstrip_open;
+        let mut height = self.timeline_height;
         timeline_edit::show_panel(
             root,
             panel,
+            &mut height,
             enabled,
             egui::Margin {
                 left: chrome::PADDING,
@@ -7590,15 +7595,14 @@ where
                             .and_then(PlaybackSession::timeline)
                             .is_none()
                     {
-                        waveform_painter.set(
-                            waveform_slot,
-                            egui::Shape::image(
-                                waveform.id(),
-                                rect,
-                                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                                waveform_detail::color(),
-                            ),
+                        let mut mesh = egui::Mesh::with_texture(waveform.id());
+                        mesh.add_rect_with_uv(
+                            rect,
+                            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                            waveform_detail::color(),
                         );
+                        waveform_painter
+                            .set(waveform_slot, egui::Shape::mesh(layout.clip_waveform(mesh)));
                     }
                     self.draw_waveform_activity(ui, rect);
                     self.draw_timeline_menu(ui, &response, actions);
@@ -7632,7 +7636,8 @@ where
                     Some(layout.view),
                 );
                 if let Some(mesh) = detail {
-                    waveform_painter.set(waveform_slot, egui::Shape::mesh(mesh));
+                    waveform_painter
+                        .set(waveform_slot, egui::Shape::mesh(layout.clip_waveform(mesh)));
                 } else if let Some(waveform) = &self.waveform {
                     let mut mesh = egui::Mesh::with_texture(waveform.id());
                     let regions = timeline_edit::waveform_regions(
@@ -7651,7 +7656,8 @@ where
                         mesh.add_rect_with_uv(destination, uv, waveform_detail::color());
                     }
                     if !mesh.is_empty() {
-                        waveform_painter.set(waveform_slot, egui::Shape::mesh(mesh));
+                        waveform_painter
+                            .set(waveform_slot, egui::Shape::mesh(layout.clip_waveform(mesh)));
                     }
                 }
                 if self.playback_selection.is_some() {
@@ -7719,6 +7725,7 @@ where
                 self.draw_timeline_menu(ui, &response, actions);
             },
         );
+        self.remember_timeline_height(height);
     }
 
     fn timeline_panel_id(&self) -> egui::Id {
@@ -16284,7 +16291,7 @@ mod tests {
         let other = app.tabs.open_new(root.join("other.mp4"), MediaKind::Video);
         let other_panel = app.timeline_panel_id();
         let other_rect = frame(&mut app, size, vec![]);
-        assert!((other_rect.height() - 96.0).abs() <= 1.0);
+        assert!((other_rect.height() - after.height()).abs() <= 1.0);
         assert!(app.tabs.activate(tab));
         let restored = frame(&mut app, size, vec![]);
         assert!((restored.height() - after.height()).abs() <= 1.0);
@@ -16913,7 +16920,10 @@ mod tests {
                                 _ => None,
                             })
                             .expect("waveform within rounded background");
-                        assert_eq!(waveform, track);
+                        assert!(
+                            waveform.min.distance(track.min) < 1e-3
+                                && waveform.max.distance(track.max) < 1e-3
+                        );
                         let fill = output
                             .shapes
                             .iter()
@@ -17414,10 +17424,10 @@ mod tests {
         app.pending_guard = Some(GuardedAction::CloseTab(tab));
         let history = app.edits[&tab].clone();
         for (tabs, reverse, activation, expected) in [
-            (1, false, egui::Key::Enter, GuardDecision::Cancel),
+            (1, false, egui::Key::Enter, GuardDecision::Save),
             (2, false, egui::Key::Enter, GuardDecision::Discard),
-            (3, false, egui::Key::Enter, GuardDecision::Save),
-            (1, true, egui::Key::Space, GuardDecision::Save),
+            (3, false, egui::Key::Enter, GuardDecision::Cancel),
+            (1, true, egui::Key::Space, GuardDecision::Cancel),
         ] {
             let context = fonts::test_context();
             let run = |events| {

@@ -1,5 +1,295 @@
 use super::*;
 
+fn time(seconds: f64) -> MediaTime {
+    MediaTime::from_nanoseconds((seconds * 1e9).round() as i64)
+}
+
+struct DragFixture {
+    context: egui::Context,
+    id: egui::Id,
+    position: MediaTime,
+    selection: Option<TimeRange>,
+    fps: f64,
+}
+
+impl DragFixture {
+    fn new(start: f64, span: f64, fps: f64) -> Self {
+        let context = crate::fonts::test_context();
+        context.global_style_mut(crate::chrome::style);
+        let id = egui::Id::new("reviewed-drag");
+        context.data_mut(|data| {
+            data.insert_temp(
+                id.with("time-viewport"),
+                View {
+                    start,
+                    span,
+                    duration: 600.0,
+                },
+            )
+        });
+        Self {
+            context,
+            id,
+            position: time(start + span * 0.5),
+            selection: None,
+            fps,
+        }
+    }
+
+    fn draw(
+        &self,
+        events: Vec<egui::Event>,
+        shift: bool,
+        repeat: bool,
+    ) -> (Layout, crate::time_selection::Output, Vec<f32>) {
+        let mut result = None;
+        let output = self.context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(640.0, 300.0))),
+                events,
+                modifiers: egui::Modifiers {
+                    shift,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            |ui| {
+                let layout = show(
+                    ui,
+                    self.id,
+                    Rect::from_min_max(egui::pos2(5.0, 100.0), egui::pos2(635.0, 220.0)),
+                    time(600.0),
+                    self.fps,
+                    true,
+                );
+                let response =
+                    ui.allocate_rect(layout.interaction(), egui::Sense::click_and_drag());
+                let output = crate::time_selection::show_in_view(
+                    ui,
+                    &response,
+                    time(600.0),
+                    self.position,
+                    self.selection,
+                    None,
+                    true,
+                    layout,
+                );
+                paint(
+                    ui,
+                    layout,
+                    self.fps,
+                    output.display_position,
+                    output.display_selection,
+                );
+                result = Some((layout, output));
+                if repeat && self.context.current_pass_index() == 0 {
+                    self.context.request_discard("verify one pan per frame");
+                }
+            },
+        );
+        let (layout, result) = result.expect("frame");
+        let mut markers = Vec::new();
+        for shape in output.shapes {
+            if let egui::Shape::Vec(shapes) = shape.shape {
+                for shape in shapes {
+                    if let egui::Shape::LineSegment { points, stroke } = shape
+                        && stroke.color == chrome::FOREGROUND
+                        && points[0].y == layout.ruler.top()
+                        && points[1].y == layout.ruler.bottom()
+                    {
+                        markers.push(points[0].x);
+                    }
+                }
+            }
+        }
+        (layout, result, markers)
+    }
+
+    fn press(&self, point: Pos2, secondary: bool) -> Layout {
+        for _ in 0..3 {
+            self.draw(vec![egui::Event::PointerMoved(point)], false, false);
+        }
+        self.draw(vec![pointer_button(point, true, secondary)], false, false)
+            .0
+    }
+}
+
+fn pointer_button(pos: Pos2, pressed: bool, secondary: bool) -> egui::Event {
+    egui::Event::PointerButton {
+        pos,
+        pressed,
+        button: if secondary {
+            egui::PointerButton::Secondary
+        } else {
+            egui::PointerButton::Primary
+        },
+        modifiers: egui::Modifiers::NONE,
+    }
+}
+
+#[test]
+fn frame_grid_handles_fractional_rates_and_maximum_zoom() {
+    for fps in [30.0, 30000.0 / 1001.0] {
+        let fixture = DragFixture::new(100.0, 640.0 / fps / 50.0, fps);
+        let layout = fixture.draw(vec![], false, false).0;
+        assert!((f64::from(layout.ruler.width()) / layout.view.span / fps - 50.0).abs() < 0.01);
+        assert_eq!(
+            tick_step(
+                layout.view.span / f64::from(layout.ruler.width()) * 50.0,
+                fps
+            ),
+            (1.0 / fps, true)
+        );
+        let origin = egui::pos2(320.0, layout.ruler.center().y);
+        fixture.press(origin, false);
+        let moved = fixture
+            .draw(
+                vec![egui::Event::PointerMoved(origin + egui::vec2(37.0, 0.0))],
+                false,
+                false,
+            )
+            .1;
+        let frames = moved.display_position.as_seconds_f64() * fps;
+        assert!((frames - frames.round()).abs() < 1e-6);
+        let last = layout.quantize(time(600.0)).as_seconds_f64() * fps;
+        assert!((last - last.round()).abs() < 1e-6);
+        assert!(layout.quantize(time(600.0)) <= time(600.0));
+    }
+}
+
+#[test]
+fn moving_selection_snaps_either_edge_only_while_shift_is_held() {
+    for edge in [200.0, 400.0] {
+        let mut fixture = DragFixture::new(0.0, 600.0, 30.0);
+        fixture.position = time(if edge == 200.0 { 100.0 } else { 500.0 });
+        fixture.selection = TimeRange::new(time(200.0), time(400.0));
+        let layout = fixture.draw(vec![], false, false).0;
+        let origin = egui::pos2(layout.view.x(layout.waveform, 300.0), 135.0);
+        fixture.press(origin, true);
+        let target = origin
+            + egui::vec2(
+                layout.waveform.width()
+                    * ((fixture.position.as_seconds_f64() - edge) / 600.0) as f32
+                    - 2.0,
+                0.0,
+            );
+        let (_, snapped, markers) =
+            fixture.draw(vec![egui::Event::PointerMoved(target)], true, false);
+        let range = snapped.display_selection.expect("selection");
+        if edge == 400.0 {
+            assert_eq!(range.end(), time(500.0));
+        } else {
+            assert_eq!(range.start(), time(100.0));
+        }
+        assert_eq!(range.duration(), time(200.0));
+        assert!(markers.is_empty());
+        if edge == 400.0 {
+            let free = fixture
+                .draw(vec![], false, false)
+                .1
+                .display_selection
+                .expect("free selection");
+            assert!(free.end() < time(500.0));
+        }
+    }
+}
+
+#[test]
+fn resize_marker_follows_the_grabbed_edge_and_reverse_creation_hides_it() {
+    let mut fixture = DragFixture::new(0.0, 600.0, 30.0);
+    fixture.selection = TimeRange::new(time(200.0), time(400.0));
+    let layout = fixture.draw(vec![], false, false).0;
+    let origin = egui::pos2(layout.view.x(layout.waveform, 200.0) + 4.0, 130.0);
+    fixture.press(origin, false);
+    let target = origin + egui::vec2(30.0, 0.0);
+    let (layout, result, markers) =
+        fixture.draw(vec![egui::Event::PointerMoved(target)], false, false);
+    let edge = layout.view.x(
+        layout.ruler,
+        result
+            .display_selection
+            .expect("resized")
+            .start()
+            .as_seconds_f64(),
+    );
+    assert_eq!(markers.len(), 1);
+    assert!((markers[0] - edge).abs() < 0.01);
+    assert!((markers[0] - target.x).abs() > 3.9);
+    let fixture = DragFixture::new(0.0, 600.0, 30.0);
+    let origin = egui::pos2(400.0, 135.0);
+    fixture.press(origin, false);
+    let (_, result, markers) = fixture.draw(
+        vec![egui::Event::PointerMoved(egui::pos2(250.0, 135.0))],
+        false,
+        false,
+    );
+    assert!(result.display_selection.is_some());
+    assert!(markers.is_empty());
+}
+
+#[test]
+fn edge_autoscroll_keeps_selection_origin_and_advances_once_per_frame() {
+    for repeat in [false, true] {
+        let mut fixture = DragFixture::new(100.0, 100.0, 30.0);
+        fixture.position = time(100.0);
+        let origin = egui::pos2(320.0, 135.0);
+        fixture.press(origin, false);
+        let (_, first, _) = fixture.draw(
+            vec![egui::Event::PointerMoved(egui::pos2(645.0, 135.0))],
+            false,
+            repeat,
+        );
+        let (before, _, _) = fixture.draw(vec![], false, repeat);
+        let (after, result, _) = fixture.draw(vec![], false, repeat);
+        assert!(after.view.start > before.view.start);
+        assert!(after.view.start - before.view.start <= 100.0 / 60.0 + 0.01);
+        assert_eq!(
+            result.display_selection.expect("selection").start(),
+            first.display_selection.expect("initial selection").start()
+        );
+        assert_eq!(
+            edge_scroll(
+                632.0,
+                Rect::from_min_max(Pos2::ZERO, egui::pos2(640.0, 300.0))
+            ),
+            0.0
+        );
+        assert_eq!(
+            edge_scroll(
+                636.0,
+                Rect::from_min_max(Pos2::ZERO, egui::pos2(640.0, 300.0))
+            ),
+            0.5
+        );
+        assert_eq!(
+            edge_scroll(
+                700.0,
+                Rect::from_min_max(Pos2::ZERO, egui::pos2(640.0, 300.0))
+            ),
+            1.0
+        );
+    }
+}
+
+#[test]
+fn secondary_scrollbar_drag_does_not_change_view() {
+    let context = crate::fonts::test_context();
+    let layout = frame(&context, vec![], true);
+    let layout = frame(&context, wheel(layout.waveform.center(), 100.0, true), true);
+    let point = thumb_rect(layout.scrollbar, layout.view).left_center();
+    frame(&context, vec![egui::Event::PointerMoved(point)], true);
+    frame(&context, vec![pointer_button(point, true, true)], true);
+    let moved = frame(
+        &context,
+        vec![egui::Event::PointerMoved(point + egui::vec2(50.0, 0.0))],
+        true,
+    );
+    assert_eq!(moved.view.start, layout.view.start);
+    assert_eq!(moved.view.span, layout.view.span);
+    let released = frame(&context, vec![pointer_button(point, false, true)], true);
+    assert_eq!(released.view.span, layout.view.span);
+}
+
 fn frame(context: &egui::Context, events: Vec<egui::Event>, enabled: bool) -> Layout {
     let mut layout = None;
     let _ = context.run_ui(
@@ -254,8 +544,7 @@ fn ruler_labels_and_scrollbar_caps_keep_the_reviewed_geometry() {
     assert!(ticks.windows(2).all(|pair| pair[1] - pair[0] >= 49.9));
     for (x, text) in ticks.into_iter().zip(labels) {
         let bounds = text.galley.rect.translate(text.pos.to_vec2());
-        let expected =
-            (x - bounds.width() * 0.5).clamp(ruler.left(), ruler.right() - bounds.width());
+        let expected = x - bounds.width() * 0.5;
         assert!((bounds.left() - expected).abs() < 0.01);
         assert!((text.pos.y + text.galley.mesh_bounds.top() - ruler.top()).abs() < 0.01);
         assert_eq!(

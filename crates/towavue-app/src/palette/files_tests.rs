@@ -770,7 +770,7 @@ fn filename_priority_and_full_row_background_survive_hover_and_selection() {
                                 body.min,
                                 body.max
                                     + egui::vec2(
-                                        crate::chrome::ROW_HEIGHT + crate::chrome::ITEM_GAP,
+                                        crate::chrome::ICON_SIZE + crate::chrome::PADDING as f32,
                                         0.0,
                                     ),
                             );
@@ -794,7 +794,10 @@ fn filename_priority_and_full_row_background_survive_hover_and_selection() {
                     let hovered = egui::Rect::from_min_max(
                         second.min,
                         second.max
-                            - egui::vec2(crate::chrome::ROW_HEIGHT + crate::chrome::ITEM_GAP, 0.0),
+                            - egui::vec2(
+                                crate::chrome::ICON_SIZE + crate::chrome::PADDING as f32,
+                                0.0,
+                            ),
                     );
                     let assert_rect = |actual: egui::Rect, expected: egui::Rect| {
                         assert!(
@@ -917,14 +920,14 @@ fn command_history_returns_hidden_removal_width_and_keeps_removal_independent() 
         assert!(
             (idle.width()
                 - hovered.width()
-                - 2.0 * (crate::chrome::ROW_HEIGHT + crate::chrome::ITEM_GAP))
+                - 2.0 * (crate::chrome::ICON_SIZE + crate::chrome::PADDING as f32))
                 .abs()
                 <= 1.0 / density
         );
         let gear = button_rect(&output, &format!("Configure keybinding: {title}"));
         let remove = button_rect(&output, &format!("Remove {title} from Recently Used"));
-        assert_eq!(gear.size(), egui::Vec2::splat(crate::chrome::ROW_HEIGHT));
-        assert_eq!(remove.size(), egui::Vec2::splat(crate::chrome::ROW_HEIGHT));
+        assert_eq!(gear.size(), egui::Vec2::splat(crate::chrome::ICON_SIZE));
+        assert_eq!(remove.size(), egui::Vec2::splat(crate::chrome::ICON_SIZE));
         let tree = output
             .platform_output
             .accesskit_update
@@ -942,13 +945,13 @@ fn command_history_returns_hidden_removal_width_and_keeps_removal_independent() 
             f64::from(remove.right()) <= bar.x0 + 1.0 / f64::from(density),
             "the scrollbar occupies popup padding beyond actions at {density}: {remove:?}, {bar:?}"
         );
-        assert!((gear.left() - hovered.right() - 2.0).abs() < 0.01);
-        assert!((remove.left() - gear.right() - 2.0).abs() < 0.01);
+        assert!((gear.left() - hovered.right() - 5.0).abs() < 0.01);
+        assert!((remove.left() - gear.right() - 5.0).abs() < 0.01);
         let shortcut =
             crate::shortcuts::defaults().label(CommandId::OpenFolder, CommandContext::default());
         let last_key = shortcut.split(['+', ' ']).next_back().expect("last key");
         let (text, _) = picker_text(&output, last_key).expect("shortcut keycap");
-        assert!((gear.left() - text.pos.x - text.galley.size().x - 6.0).abs() <= 1.0 / density);
+        assert!((gear.left() - text.pos.x - text.galley.size().x - 9.0).abs() <= 1.0 / density);
         // The exposed portion still invokes removal, before the bar scrolls it away.
         let point = egui::pos2(remove.left() + 2.0, remove.center().y);
         render(&mut palette, vec![egui::Event::PointerMoved(point)]);
@@ -1035,9 +1038,9 @@ fn palette_gear_configures_available_commands_and_omits_unavailable_commands() {
             output = frame(&mut palette, vec![]).0;
             let label = format!("Configure keybinding: {}", definition.title);
             let gear = button_rect(&output, &label);
-            assert_eq!(gear.size(), egui::Vec2::splat(crate::chrome::ROW_HEIGHT));
+            assert_eq!(gear.size(), egui::Vec2::splat(crate::chrome::ICON_SIZE));
             assert!(
-                (gear.left() - button_rect(&output, definition.title).right() - 2.0).abs() < 0.01
+                (gear.left() - button_rect(&output, definition.title).right() - 5.0).abs() < 0.01
             );
             let tree = output
                 .platform_output

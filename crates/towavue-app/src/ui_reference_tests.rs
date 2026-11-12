@@ -612,7 +612,12 @@ fn fixture(root: &Path, context: &egui::Context, scene: &str) -> Application<fn(
             );
             let mut waveform = egui::ColorImage::filled([512, 64], Color32::TRANSPARENT);
             for x in 0..512 {
-                let amplitude = 4 + (x * 17 % 25);
+                // Full-height endpoints expose rounded waveform clipping in readbacks.
+                let amplitude = if !(8..504).contains(&x) {
+                    32
+                } else {
+                    4 + (x * 17 % 25)
+                };
                 for y in (32 - amplitude)..(32 + amplitude) {
                     waveform[(x, y)] = Color32::WHITE;
                 }

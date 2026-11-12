@@ -344,14 +344,22 @@ impl CommandPalette {
                 let folder_mode = self.folder_mode();
                 let mut back = false;
                 ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
                     if self.step.is_some() {
                         let (_, rect) = ui.allocate_space(egui::vec2(
                             crate::chrome::ICON_SIZE,
                             crate::chrome::ROW_HEIGHT,
                         ));
-                        back = row_icon(ui, rect, '\u{eab5}')
-                            .on_hover_text(Text::CommandHistoryBack.in_language(language))
-                            .clicked();
+                        back = row_icon(
+                            ui,
+                            egui::Rect::from_center_size(
+                                rect.center(),
+                                egui::Vec2::splat(crate::chrome::ICON_SIZE),
+                            ),
+                            '\u{eab5}',
+                        )
+                        .on_hover_text(Text::CommandHistoryBack.in_language(language))
+                        .clicked();
                     }
                     ui.add_sized(
                         [ui.available_width(), crate::chrome::ROW_HEIGHT],
@@ -362,7 +370,6 @@ impl CommandPalette {
                                 top: 0,
                                 bottom: 0,
                             }))
-                            .margin(egui::vec2(crate::chrome::PADDING as f32, 0.0))
                             .vertical_align(egui::Align::Center)
                             .id(query_id)
                             .text_color(crate::chrome::FOREGROUND)
@@ -729,7 +736,11 @@ impl CommandPalette {
                         && crate::tab_icons::enabled(ui.ctx()))
                     .then(|| crate::tab_icons::media(Some(path.as_path())))
                     .flatten();
-                    let icon_width = if icon.is_some() { 22.0 } else { 0.0 };
+                    let icon_width = if icon.is_some() {
+                        crate::chrome::ICON_SIZE + crate::chrome::PADDING as f32
+                    } else {
+                        0.0
+                    };
                     let (name_width, parent_width, _) =
                         file_label_widths(ui, (body.width() - icon_width).max(0.0), &name, "");
                     let mut atoms = egui::Atoms::new((
@@ -746,7 +757,11 @@ impl CommandPalette {
                             &parent,
                             &query,
                             crate::chrome::TEXT_SM,
-                            crate::chrome::MUTED,
+                            if selected_row {
+                                crate::chrome::MUTED
+                            } else {
+                                crate::chrome::FAINT
+                            },
                         )
                         .atom_max_width(parent_width)
                         .atom_shrink(true),
@@ -2435,7 +2450,11 @@ mod tests {
                         );
                         assert_eq!(
                             parent.galley.job.sections[0].format.color,
-                            crate::chrome::MUTED
+                            if palette.selected_path.as_ref() == Some(path) {
+                                crate::chrome::MUTED
+                            } else {
+                                crate::chrome::FAINT
+                            }
                         );
                         assert!(
                             name.pos.x >= clip.left() - 1.0

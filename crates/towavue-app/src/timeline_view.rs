@@ -64,6 +64,8 @@ pub(super) struct Layout {
     pub view: View,
     ruler_shape: Option<egui::layers::ShapeIdx>,
     hover_key: egui::Id,
+    key: egui::Id,
+    fps: f64,
 }
 
 impl Layout {
@@ -75,6 +77,8 @@ impl Layout {
             scrollbar: Rect::NOTHING,
             ruler_shape: None,
             hover_key: egui::Id::NULL,
+            key: egui::Id::NULL,
+            fps: 0.0,
             view: View {
                 start: 0.0,
                 span: duration.as_seconds_f64().max(f64::EPSILON),
@@ -88,6 +92,53 @@ impl Layout {
         }
         let frame = context.cumulative_frame_nr();
         context.data_mut(|data| data.insert_temp(self.hover_key, frame));
+    }
+    /// Quantize only when a frame occupies more than one logical point.
+    pub fn quantize(self, time: MediaTime) -> MediaTime {
+        if self.fps > 0.0 && f64::from(self.waveform.width()) / self.view.span / self.fps > 1.0 {
+            let frame = (time.as_seconds_f64() * self.fps)
+                .round()
+                .clamp(0.0, (self.view.duration * self.fps + 1e-9).floor());
+            MediaTime::from_nanoseconds((frame / self.fps * 1e9).round() as i64)
+        } else {
+            time
+        }
+    }
+    pub fn frame_step(self) -> i64 {
+        if self.fps > 0.0 && f64::from(self.waveform.width()) / self.view.span / self.fps > 1.0 {
+            (1e9 / self.fps).round() as i64
+        } else {
+            1
+        }
+    }
+    pub fn drag_feedback(
+        self,
+        context: &egui::Context,
+        scroll: bool,
+        ruler_time: Option<MediaTime>,
+    ) {
+        let frame = context.cumulative_frame_nr();
+        if scroll
+            && context.pointer_latest_pos().is_some_and(|point| {
+                let speed = edge_scroll(point.x, context.content_rect());
+                (speed < 0.0 && self.view.start > 0.0)
+                    || (speed > 0.0 && self.view.start + self.view.span < self.view.duration)
+            })
+        {
+            context.request_repaint();
+        }
+        context.data_mut(|data| {
+            data.insert_temp(self.key.with("auto-scroll"), scroll);
+            data.insert_temp(self.hover_key.with("drag"), (frame, ruler_time));
+        });
+    }
+    pub fn clip_waveform(self, mesh: egui::Mesh) -> egui::Mesh {
+        crate::timeline_waveform_clip::rounded(
+            mesh,
+            self.waveform,
+            self.view.start <= f64::EPSILON,
+            self.view.start + self.view.span >= self.view.duration - f64::EPSILON,
+        )
     }
     pub fn head_top(self) -> f32 {
         if self.ruler.is_positive() {
@@ -130,8 +181,7 @@ pub(super) fn show(
             (scrollbar.top() - GAP).max((ruler.bottom() + GAP).min(scrollbar.top())),
         ),
     );
-    let minimum =
-        f64::from((rect.width() + 2.0 * chrome::PADDING as f32).max(1.0)) / (fps.max(1.0) * 30.0);
+    let minimum = f64::from(rect.width().max(1.0)) / (fps.max(1.0) * 50.0);
     let key = id.with("time-viewport");
     let mut view = ui
         .ctx()
@@ -166,6 +216,35 @@ pub(super) fn show(
             }
         }
     }
+    // Advance once per frame, even when egui repeats layout. Only owned time
+    // gestures opt in; a gain adjustment or an open popup cannot pan the view.
+    let frame_key = key.with("auto-scroll-frame");
+    if enabled
+        && !egui::Popup::is_any_open(ui.ctx())
+        && crate::timeline_input::is_active(ui.ctx())
+        && ui
+            .ctx()
+            .data(|data| data.get_temp::<bool>(key.with("auto-scroll")))
+            == Some(true)
+        && ui.ctx().data(|data| data.get_temp::<u64>(frame_key)) != Some(frame)
+        && ui.input(|input| {
+            input.focused && input.pointer.any_down() && !input.key_pressed(egui::Key::Escape)
+        })
+        && let Some(pointer) = ui.ctx().pointer_latest_pos()
+    {
+        let window = ui.ctx().content_rect();
+        let speed = edge_scroll(pointer.x, window);
+        if speed != 0.0 {
+            let before = view.start;
+            view.start +=
+                f64::from(speed * ui.input(|input| input.stable_dt).min(0.05)) * view.span;
+            view.clamp(minimum);
+            ui.ctx().data_mut(|data| data.insert_temp(frame_key, frame));
+            if view.start != before {
+                ui.ctx().request_repaint();
+            }
+        }
+    }
     let response = ui.interact(
         scrollbar,
         id.with("time-scrollbar"),
@@ -188,6 +267,7 @@ pub(super) fn show(
         }
     } else {
         if response.is_pointer_button_down_on()
+            && ui.input(|input| input.pointer.primary_down())
             && let Some(origin) = ui.input(|input| input.pointer.press_origin())
         {
             ui.ctx().set_dragged_id(response.id);
@@ -260,11 +340,23 @@ pub(super) fn show(
             });
         }
     }
+    let frame_minimum =
+        |view| f64::from(content_rect(waveform, view).width().max(1.0)) / (fps.max(1.0) * 50.0);
+    if view.span <= frame_minimum(view) + 1e-9 {
+        view.clamp(frame_minimum(view));
+        // Reaching a true endpoint restores its inset. Recompute the limit
+        // once with that geometry so one-frame ticks still fit at the boundary.
+        let end = view.start + view.span >= view.duration - f64::EPSILON;
+        view.span = frame_minimum(view).min(view.duration);
+        if end {
+            view.start = view.duration - view.span;
+        }
+        view.clamp(frame_minimum(view));
+    }
     let at_start = view.start <= f64::EPSILON;
     let at_end = view.start + view.span >= view.duration - f64::EPSILON;
     let waveform = content_rect(waveform, view);
     let ruler = content_rect(ruler, view);
-    view.clamp(f64::from(waveform.width().max(1.0)) / (fps.max(1.0) * 30.0));
     ui.ctx().data_mut(|data| data.insert_temp(key, view));
     let corners = egui::CornerRadius {
         nw: if at_start { chrome::RADIUS_XS } else { 0 },
@@ -283,7 +375,15 @@ pub(super) fn show(
         // Ruler content is filled after input, below the CTI painted by selection.
         ruler_shape: Some(ui.painter().with_clip_rect(ruler).add(egui::Shape::Noop)),
         hover_key: key.with("ruler-hover-suppressed"),
+        key,
+        fps,
     }
+}
+
+fn edge_scroll(x: f32, window: Rect) -> f32 {
+    // Up to one visible span per second; the outer eight points ramp smoothly.
+    ((x - (window.right() - 8.0)) / 8.0).clamp(0.0, 1.0)
+        - (((window.left() + 8.0) - x) / 8.0).clamp(0.0, 1.0)
 }
 
 fn content_rect(mut rect: Rect, view: View) -> Rect {
@@ -316,8 +416,9 @@ pub(super) fn paint(
     let view = layout.view;
     let minimum = view.span / f64::from(layout.ruler.width().max(1.0)) * 50.0;
     let (step, frames) = tick_step(minimum, fps);
-    let first = (view.start / step).ceil() as u64;
-    let last = ((view.start + view.span) / step).floor() as u64;
+    let first = (view.start / step).floor() as u64;
+    let last = (((view.start + view.span) / step).ceil() as u64)
+        .min((view.duration / step).floor() as u64);
     let mut shapes = Vec::new();
     for tick in first..=last.min(first + 512) {
         let seconds = tick as f64 * step;
@@ -334,10 +435,9 @@ pub(super) fn paint(
             egui::FontId::proportional(chrome::TEXT_SM),
             chrome::MUTED,
         );
-        let left = (x - text.size().x * 0.5).clamp(
-            layout.ruler.left(),
-            (layout.ruler.right() - text.size().x).max(layout.ruler.left()),
-        );
+        let full = view.full_rect(layout.ruler);
+        let left = (x - text.size().x * 0.5)
+            .clamp(full.left(), (full.right() - text.size().x).max(full.left()));
         shapes.push(egui::Shape::galley(
             egui::pos2(left, layout.ruler.top() - text.mesh_bounds.top()),
             text,
@@ -366,6 +466,19 @@ pub(super) fn paint(
                 (1.0, chrome::FOREGROUND),
             ));
         }
+    }
+    if let Some((painted, Some(time))) =
+        ui.data(|data| data.get_temp::<(u64, Option<MediaTime>)>(layout.hover_key.with("drag")))
+        && painted == frame
+    {
+        let x = view.x(layout.ruler, time.as_seconds_f64());
+        shapes.push(egui::Shape::line_segment(
+            [
+                egui::pos2(x, layout.ruler.top()),
+                egui::pos2(x, layout.ruler.bottom()),
+            ],
+            (1.0, chrome::FOREGROUND),
+        ));
     }
     if let Some(slot) = layout.ruler_shape {
         painter.set(slot, egui::Shape::Vec(shapes));
@@ -417,7 +530,7 @@ pub(super) fn paint(
 
 fn tick_step(minimum: f64, fps: f64) -> (f64, bool) {
     for frames in [1.0, 5.0] {
-        if frames / fps >= minimum {
+        if frames / fps >= minimum * (1.0 - 1e-9) {
             return (frames / fps, true);
         }
     }
@@ -445,16 +558,16 @@ fn tick_label(seconds: f64, step: f64, fps: f64, frames: bool) -> String {
         let frame = (seconds * fps).round() as u64;
         let nominal = fps.round().max(1.0) as u64;
         if frame.is_multiple_of(nominal) {
-            format!("{:02}:{:02}f", frame / nominal, 0)
+            format!("{}:{:02}f", frame / nominal, 0)
         } else {
             format!("{:02}f", frame % nominal)
         }
     } else {
         let second = seconds.round() as u64;
         if step >= 60.0 {
-            format!("{:02}m", second / 60)
+            format!("{}m", second / 60)
         } else if step >= 15.0 || second.is_multiple_of(60) {
-            format!("{:02}:{:02}s", second / 60, second % 60)
+            format!("{}:{:02}s", second / 60, second % 60)
         } else {
             format!("{:02}s", second % 60)
         }
@@ -465,7 +578,7 @@ fn tick_label(seconds: f64, step: f64, fps: f64, frames: bool) -> String {
 mod tests {
     use super::*;
     #[test]
-    fn zoom_keeps_pointer_time_and_bounds_thirty_points_per_frame() {
+    fn zoom_keeps_pointer_time_and_bounds_fifty_points_per_frame() {
         let mut view = View::default();
         view.fit(600.0, 1.0);
         let anchor = view.start + view.span * 0.3;
@@ -485,8 +598,8 @@ mod tests {
         assert_eq!(tick_step(2.1, 30.0), (5.0, false));
         assert_eq!(tick_step(0.1, 30.0), (5.0 / 30.0, true));
         assert_eq!(tick_step(28.0 / (30.0 * 30.0), 30.0), (1.0 / 30.0, true));
-        assert_eq!(tick_label(60.0, 5.0, 30.0, false), "01:00s");
-        assert_eq!(tick_label(1.0, 1.0 / 30.0, 30.0, true), "01:00f");
+        assert_eq!(tick_label(60.0, 5.0, 30.0, false), "1:00s");
+        assert_eq!(tick_label(1.0, 1.0 / 30.0, 30.0, true), "1:00f");
     }
 }
 

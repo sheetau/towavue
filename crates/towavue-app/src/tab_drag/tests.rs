@@ -109,10 +109,10 @@ fn tab_feedback_uses_exact_bounds_unified_colors_and_no_drag_hover() {
             );
             assert_eq!(
                 color(&output, if hovered { "\u{ea76}" } else { "\u{ea71}" }),
-                Some(if hovered {
-                    chrome::MUTED
+                Some(if point == rect.right_center() - egui::vec2(12.0, 0.0) {
+                    chrome::FOREGROUND
                 } else {
-                    chrome::FAINT
+                    chrome::MUTED
                 })
             );
         }

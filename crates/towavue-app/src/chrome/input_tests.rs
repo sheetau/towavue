@@ -276,6 +276,7 @@ fn modal_combo_text_shares_the_adjacent_label_center_without_growing_the_button(
                             ui,
                             "Resample",
                             80.0,
+                            120.0,
                             egui::ComboBox::from_id_salt("resample").selected_text("Lanczos"),
                             |_| {},
                         )

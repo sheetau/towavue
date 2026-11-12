@@ -24,14 +24,27 @@ fn terms(text: &str) -> BTreeMap<String, usize> {
 
 // Direct matches retain MRU priority. Every command supplies search phrases;
 // ranking is shared and never dispatches based on the query itself.
+#[cfg(test)]
 pub(super) fn ranked(
     query: &str,
     language: localization::Language,
     history: &[CommandId],
 ) -> (Vec<&'static CommandDefinition>, usize, usize) {
+    ranked_available(query, language, history, None)
+}
+
+pub(super) fn ranked_available(
+    query: &str,
+    language: localization::Language,
+    history: &[CommandId],
+    context: Option<CommandContext>,
+) -> (Vec<&'static CommandDefinition>, usize, usize) {
     let definitions: Vec<_> = command_definitions()
         .iter()
-        .filter(|definition| !options::child(definition.id))
+        .filter(|definition| {
+            !options::child(definition.id)
+                && context.is_none_or(|context| definition.is_enabled(context))
+        })
         .collect();
     let labels: Vec<_> = definitions
         .iter()
@@ -177,6 +190,58 @@ fn title_for_english(command: &CommandDefinition) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unavailable_commands_are_removed_before_ranking_history_and_suggestion_limits() {
+        for media_kind in [
+            None,
+            Some(towavue_core::MediaKind::Image),
+            Some(towavue_core::MediaKind::Audio),
+            Some(towavue_core::MediaKind::Video),
+        ] {
+            let context = CommandContext {
+                media_kind,
+                palette_open: true,
+                ..Default::default()
+            };
+            for query in ["", "play", "fast", "skip", "save", "image"] {
+                let (found, recent, direct) = ranked_available(
+                    query,
+                    localization::Language::English,
+                    &[CommandId::SeekForward, CommandId::OpenFile],
+                    Some(context),
+                );
+                assert!(found.iter().all(|command| command.is_enabled(context)));
+                assert!(recent <= direct && direct <= found.len());
+                assert!(found.len() - direct <= 5);
+            }
+        }
+        let empty = CommandContext {
+            palette_open: true,
+            ..Default::default()
+        };
+        assert!(
+            !ranked_available(
+                "seek forward",
+                localization::Language::English,
+                &[CommandId::SeekForward],
+                Some(empty)
+            )
+            .0
+            .iter()
+            .any(|command| command.id == CommandId::SeekForward)
+        );
+        let audio = CommandContext {
+            media_kind: Some(towavue_core::MediaKind::Audio),
+            ..empty
+        };
+        assert!(
+            ranked_available("skip", localization::Language::English, &[], Some(audio))
+                .0
+                .iter()
+                .any(|command| command.id == CommandId::SeekForward)
+        );
+    }
+
     #[test]
     fn vocabulary_covers_actions_languages_directions_and_numeric_qualifiers() {
         for language in [

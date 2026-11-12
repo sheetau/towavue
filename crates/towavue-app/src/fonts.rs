@@ -84,7 +84,14 @@ fn definitions_from_data(
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
         "figtree".into(),
-        egui::FontData::from_static(include_bytes!("../assets/fonts/Figtree-Tabular.ttf")).into(),
+        egui::FontData::from_static(include_bytes!("../assets/fonts/Figtree-Tabular.ttf"))
+            // Figtree: 1000 ascent, -200 descent, 700 cap height per 1000 em.
+            // Center its cap-height reference in the 1200-unit line box.
+            .tweak(egui::FontTweak {
+                y_offset_factor: -0.05,
+                ..Default::default()
+            })
+            .into(),
     );
     fonts.font_data.insert(
         "codicon".into(),

@@ -155,8 +155,11 @@ impl AudioExportDialog {
                             } else {
                                 ui.label(Text::AudioTracksLoading.in_language(display_language));
                             }
-                            ui.label(Text::SavedAudioTracksHelp.in_language(display_language));
-                            crate::chrome::separator(ui);
+                            chrome::modal_description(
+                                ui,
+                                Text::SavedAudioTracksHelp.in_language(display_language),
+                            );
+                            chrome::modal_group_gap(ui);
                         }
                         let labels = [
                             Text::Normalization,
@@ -195,6 +198,7 @@ impl AudioExportDialog {
                                     ui,
                                     labels[0],
                                     label_width,
+                                    field_width,
                                     egui::ComboBox::from_id_salt("normalization")
                                         .truncate()
                                         .width(field_width)
@@ -263,6 +267,7 @@ impl AudioExportDialog {
                                     ui,
                                     labels[1],
                                     label_width,
+                                    field_width,
                                     egui::ComboBox::from_id_salt("output-channels")
                                         .truncate()
                                         .width(field_width)
@@ -297,13 +302,28 @@ impl AudioExportDialog {
                                 ui.end_row();
                             });
                         if matches!(self.options.normalization, AudioNormalization::Loudness(_)) {
-                            ui.label(Text::LoudnessVerificationHelp.in_language(display_language));
+                            chrome::modal_description(
+                                ui,
+                                Text::LoudnessVerificationHelp.in_language(display_language),
+                            );
                         }
-                        crate::chrome::separator(ui);
-                        ui.label(Text::AudioOptionsScope.in_language(display_language));
-                        ui.label(Text::NormalizationHelp.in_language(display_language));
-                        ui.label(Text::ChannelConversionHelp.in_language(display_language));
-                        ui.label(Text::AudioOptionsLifetime.in_language(display_language));
+                        chrome::modal_group_gap(ui);
+                        chrome::modal_description(
+                            ui,
+                            Text::AudioOptionsScope.in_language(display_language),
+                        );
+                        chrome::modal_description(
+                            ui,
+                            Text::NormalizationHelp.in_language(display_language),
+                        );
+                        chrome::modal_description(
+                            ui,
+                            Text::ChannelConversionHelp.in_language(display_language),
+                        );
+                        chrome::modal_description(
+                            ui,
+                            Text::AudioOptionsLifetime.in_language(display_language),
+                        );
                     },
                 );
                 let buttons = chrome::modal_actions(

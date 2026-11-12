@@ -175,14 +175,30 @@ fn format_duration(time: MediaTime) -> String {
     let nanos = time.as_nanoseconds();
     let fraction = nanos % 1_000_000_000;
     let mut text = crate::format_time(time);
-    if fraction != 0 {
-        text.push_str(format!(".{fraction:09}").trim_end_matches('0'));
+    let mut fraction = format!("{fraction:09}");
+    while fraction.len() > 3 && fraction.ends_with('0') {
+        fraction.pop();
     }
+    text.push(':');
+    text.push_str(&fraction);
     text
 }
 
 fn parse_duration(text: &str) -> Option<MediaTime> {
-    let fields: Vec<_> = text.trim().split(':').collect();
+    // Keep accepting pasted legacy decimal-second input. New text separates
+    // the decimal subsecond field with a colon and at least three digits.
+    let text = text.trim();
+    let fields: Vec<_> = text.split(':').collect();
+    let colon_fraction =
+        (fields.len() == 4 || (fields.len() == 3 && fields[2].len() >= 3)) && !text.contains('.');
+    let normalized;
+    let fields: Vec<_> = if colon_fraction {
+        let (clock, fraction) = text.rsplit_once(':')?;
+        normalized = format!("{clock}.{fraction}");
+        normalized.split(':').collect()
+    } else {
+        fields
+    };
     if !(2..=3).contains(&fields.len()) {
         return None;
     }

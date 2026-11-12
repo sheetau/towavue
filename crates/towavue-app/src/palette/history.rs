@@ -15,11 +15,9 @@ impl CommandPalette {
         let language = language(ui.ctx());
         let (navigation, enter) = navigation;
         let query = self.query[1..].trim().to_lowercase();
-        let (matches, recent_count, direct_count) = search::ranked(&query, language, history);
-        let enabled: Vec<_> = matches
-            .iter()
-            .map(|definition| definition.is_enabled(commands))
-            .collect();
+        let (matches, recent_count, direct_count) =
+            search::ranked_available(&query, language, history, Some(commands));
+        let enabled = vec![true; matches.len()];
         let previous_index = self.selected;
         self.selected = self
             .selected_command
@@ -89,8 +87,16 @@ impl CommandPalette {
                         },
                     );
                     let background = ui.painter().add(egui::Shape::Noop);
-                    let mut atoms = egui::Atoms::new((title.as_str(), egui::Atom::grow()));
-                    let caps = row::Keycaps::new(ui, &shortcut, selected, enabled[index]);
+                    let mut atoms = egui::Atoms::new((
+                        highlight::label(
+                            &title,
+                            &query,
+                            crate::chrome::TEXT_MD,
+                            egui::Color32::PLACEHOLDER,
+                        ),
+                        egui::Atom::grow(),
+                    ));
+                    let caps = row::Keycaps::new(ui, &shortcut, selected);
                     let cap_width = caps.width().min(body.width() * 0.5);
                     if cap_width > 0.0 {
                         atoms.push_right(
@@ -98,12 +104,7 @@ impl CommandPalette {
                         );
                     }
                     let response = ui
-                        .push_id(definition.id, |ui| {
-                            ui.add_enabled_ui(enabled[index], |ui| {
-                                row_button(ui, body, selected, atoms)
-                            })
-                            .inner
-                        })
+                        .push_id(definition.id, |ui| row_button(ui, body, selected, atoms))
                         .inner
                         .help_ui(|ui| {
                             ui.set_max_width(

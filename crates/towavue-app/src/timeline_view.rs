@@ -3,7 +3,7 @@ use egui::{Pos2, Rect, Ui};
 use towavue_core::{MediaTime, TimeRange};
 
 const RULER_HEIGHT: f32 = 16.0;
-const BAR_HEIGHT: f32 = 9.0;
+const BAR_HEIGHT: f32 = 10.0;
 const GAP: f32 = 5.0;
 
 /// Edited-time viewport, independent of playback and waveform requests.
@@ -62,6 +62,8 @@ pub(super) struct Layout {
     pub ruler: Rect,
     pub scrollbar: Rect,
     pub view: View,
+    ruler_shape: Option<egui::layers::ShapeIdx>,
+    hover_key: egui::Id,
 }
 
 impl Layout {
@@ -71,12 +73,21 @@ impl Layout {
             waveform: rect,
             ruler: Rect::NOTHING,
             scrollbar: Rect::NOTHING,
+            ruler_shape: None,
+            hover_key: egui::Id::NULL,
             view: View {
                 start: 0.0,
                 span: duration.as_seconds_f64().max(f64::EPSILON),
                 duration: duration.as_seconds_f64().max(f64::EPSILON),
             },
         }
+    }
+    pub fn suppress_hover(self, context: &egui::Context) {
+        if self.ruler_shape.is_none() {
+            return;
+        }
+        let frame = context.cumulative_frame_nr();
+        context.data_mut(|data| data.insert_temp(self.hover_key, frame));
     }
     pub fn head_top(self) -> f32 {
         if self.ruler.is_positive() {
@@ -119,7 +130,8 @@ pub(super) fn show(
             (scrollbar.top() - GAP).max((ruler.bottom() + GAP).min(scrollbar.top())),
         ),
     );
-    let minimum = f64::from(rect.width().max(1.0)) / (fps.max(1.0) * 30.0);
+    let minimum =
+        f64::from((rect.width() + 2.0 * chrome::PADDING as f32).max(1.0)) / (fps.max(1.0) * 30.0);
     let key = id.with("time-viewport");
     let mut view = ui
         .ctx()
@@ -139,10 +151,17 @@ pub(super) fn show(
         }
         for (pointer, delta, zoom) in wheel {
             if zoom {
-                let anchor = f64::from((pointer.x - rect.left()) / rect.width().max(1.0));
+                let before = content_rect(rect, view);
+                let anchor = f64::from((pointer.x - before.left()) / before.width().max(1.0));
+                let time = view.start + anchor * view.span;
                 view.zoom((-delta * 0.01).exp(), anchor, minimum);
+                let after = content_rect(rect, view);
+                view.start = time
+                    - f64::from((pointer.x - after.left()) / after.width().max(1.0)) * view.span;
+                view.clamp(minimum);
             } else {
-                view.start -= delta / f64::from(rect.width().max(1.0)) * view.span;
+                view.start -=
+                    delta / f64::from(content_rect(rect, view).width().max(1.0)) * view.span;
                 view.clamp(minimum);
             }
         }
@@ -237,27 +256,53 @@ pub(super) fn show(
             ui.ctx().set_cursor_icon(if edge {
                 egui::CursorIcon::ResizeHorizontal
             } else {
-                egui::CursorIcon::Grab
+                egui::CursorIcon::Default
             });
         }
     }
+    let at_start = view.start <= f64::EPSILON;
+    let at_end = view.start + view.span >= view.duration - f64::EPSILON;
+    let waveform = content_rect(waveform, view);
+    let ruler = content_rect(ruler, view);
+    view.clamp(f64::from(waveform.width().max(1.0)) / (fps.max(1.0) * 30.0));
     ui.ctx().data_mut(|data| data.insert_temp(key, view));
+    let corners = egui::CornerRadius {
+        nw: if at_start { chrome::RADIUS_XS } else { 0 },
+        sw: if at_start { chrome::RADIUS_XS } else { 0 },
+        ne: if at_end { chrome::RADIUS_XS } else { 0 },
+        se: if at_end { chrome::RADIUS_XS } else { 0 },
+    };
     ui.painter()
-        .rect_filled(waveform, chrome::RADIUS_XS, chrome::SURFACE);
+        .with_clip_rect(waveform)
+        .rect_filled(waveform, corners, chrome::SURFACE);
     Layout {
         waveform,
         ruler,
         scrollbar,
         view,
+        // Ruler content is filled after input, below the CTI painted by selection.
+        ruler_shape: Some(ui.painter().with_clip_rect(ruler).add(egui::Shape::Noop)),
+        hover_key: key.with("ruler-hover-suppressed"),
     }
 }
 
+fn content_rect(mut rect: Rect, view: View) -> Rect {
+    if view.start > f64::EPSILON {
+        rect.min.x -= chrome::PADDING as f32;
+    }
+    if view.start + view.span < view.duration - f64::EPSILON {
+        rect.max.x += chrome::PADDING as f32;
+    }
+    rect
+}
+
 fn thumb_rect(bar: Rect, view: View) -> Rect {
-    Rect::from_x_y_ranges(
-        bar.left() + (view.start / view.duration) as f32 * bar.width()
-            ..=bar.left() + ((view.start + view.span) / view.duration) as f32 * bar.width(),
-        bar.y_range(),
-    )
+    let width = ((view.span / view.duration) as f32 * bar.width())
+        .max(10.0)
+        .min(bar.width());
+    let left =
+        (bar.left() + (view.start / view.duration) as f32 * bar.width()).min(bar.right() - width);
+    Rect::from_min_size(egui::pos2(left, bar.top()), egui::vec2(width, bar.height()))
 }
 
 pub(super) fn paint(
@@ -267,38 +312,65 @@ pub(super) fn paint(
     position: MediaTime,
     selection: Option<TimeRange>,
 ) {
-    let painter = ui.painter().with_clip_rect(layout.interaction());
+    let painter = ui.painter().with_clip_rect(layout.ruler);
     let view = layout.view;
-    let minimum = view.span / f64::from(layout.ruler.width().max(1.0)) * 28.0;
+    let minimum = view.span / f64::from(layout.ruler.width().max(1.0)) * 50.0;
     let (step, frames) = tick_step(minimum, fps);
     let first = (view.start / step).ceil() as u64;
     let last = ((view.start + view.span) / step).floor() as u64;
-    let mut label_right = f32::NEG_INFINITY;
+    let mut shapes = Vec::new();
     for tick in first..=last.min(first + 512) {
         let seconds = tick as f64 * step;
         let x = view.x(layout.ruler, seconds);
-        painter.vline(
-            x,
-            layout.ruler.bottom() - 4.0..=layout.ruler.bottom(),
+        shapes.push(egui::Shape::line_segment(
+            [
+                egui::pos2(x, layout.ruler.bottom() - 4.0),
+                egui::pos2(x, layout.ruler.bottom()),
+            ],
             (1.0, chrome::FAINT),
+        ));
+        let text = painter.layout_no_wrap(
+            tick_label(seconds, step, fps, frames),
+            egui::FontId::proportional(chrome::TEXT_SM),
+            chrome::MUTED,
         );
-        // At the 30-point/frame limit, retain every frame tick. Wider boundary
-        // labels can omit the following label without hiding its tick.
-        if x >= label_right + 4.0 {
-            let label = painter.text(
-                egui::pos2(x, layout.ruler.top()),
-                egui::Align2::LEFT_TOP,
-                tick_label(seconds, step, fps, frames),
-                egui::FontId::proportional(chrome::TEXT_SM),
-                chrome::MUTED,
-            );
-            label_right = label.right();
+        let left = (x - text.size().x * 0.5).clamp(
+            layout.ruler.left(),
+            (layout.ruler.right() - text.size().x).max(layout.ruler.left()),
+        );
+        shapes.push(egui::Shape::galley(
+            egui::pos2(left, layout.ruler.top() - text.mesh_bounds.top()),
+            text,
+            chrome::MUTED,
+        ));
+    }
+    let frame = ui.ctx().cumulative_frame_nr();
+    let suppressed = ui.data(|data| data.get_temp::<u64>(layout.hover_key));
+    let moved = ui.input(|input| {
+        input
+            .events
+            .iter()
+            .any(|event| matches!(event, egui::Event::PointerMoved(_)))
+    });
+    let suppressed = suppressed.is_some_and(|last| last == frame || !moved);
+    if !suppressed {
+        ui.data_mut(|data| data.remove::<u64>(layout.hover_key));
+        if ui.rect_contains_pointer(layout.interaction())
+            && let Some(point) = ui.ctx().pointer_hover_pos()
+        {
+            shapes.push(egui::Shape::line_segment(
+                [
+                    egui::pos2(point.x, layout.ruler.top()),
+                    egui::pos2(point.x, layout.ruler.bottom()),
+                ],
+                (1.0, chrome::FOREGROUND),
+            ));
         }
     }
-    if ui.rect_contains_pointer(layout.interaction())
-        && let Some(point) = ui.ctx().pointer_hover_pos()
-    {
-        painter.vline(point.x, layout.ruler.y_range(), (1.0, chrome::FOREGROUND));
+    if let Some(slot) = layout.ruler_shape {
+        painter.set(slot, egui::Shape::Vec(shapes));
+    } else {
+        painter.add(egui::Shape::Vec(shapes));
     }
     let painter = ui.painter().with_clip_rect(layout.scrollbar);
     painter.rect_filled(
@@ -307,7 +379,21 @@ pub(super) fn paint(
         chrome::FLOATING_BACKGROUND,
     );
     let thumb = thumb_rect(layout.scrollbar, view);
-    painter.rect_filled(thumb, chrome::RADIUS_XS, chrome::SURFACE);
+    painter.rect_filled(thumb, chrome::RADIUS_XS, chrome::KEY_ACTIVE);
+    for left in [true, false] {
+        let cap = if left {
+            thumb.with_max_x(thumb.left() + 5.0)
+        } else {
+            thumb.with_min_x(thumb.right() - 5.0)
+        };
+        let corners = egui::CornerRadius {
+            nw: if left { chrome::RADIUS_XS } else { 0 },
+            sw: if left { chrome::RADIUS_XS } else { 0 },
+            ne: if left { 0 } else { chrome::RADIUS_XS },
+            se: if left { 0 } else { chrome::RADIUS_XS },
+        };
+        painter.rect_filled(cap, corners, chrome::FAINT);
+    }
     if let Some(range) = selection {
         let left = layout.scrollbar.left()
             + (range.start().as_seconds_f64() / view.duration) as f32 * layout.scrollbar.width();

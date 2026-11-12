@@ -6,7 +6,7 @@ pub(super) fn category(ui: &mut egui::Ui, label: &str) {
     ui.painter().text(
         rect.left_center() + egui::vec2(crate::chrome::PADDING as f32, 0.0),
         egui::Align2::LEFT_CENTER,
-        label,
+        label.to_uppercase(),
         egui::FontId::proportional(crate::chrome::TEXT_SM),
         crate::chrome::FAINT,
     );
@@ -17,10 +17,8 @@ pub(super) fn category(ui: &mut egui::Ui, label: &str) {
 pub(super) struct Keycaps(Vec<(std::sync::Arc<egui::Galley>, bool)>, f32);
 
 impl Keycaps {
-    pub fn new(ui: &egui::Ui, label: &str, selected: bool, enabled: bool) -> Self {
-        let color = if !enabled {
-            crate::chrome::DISABLED
-        } else if selected {
+    pub fn new(ui: &egui::Ui, label: &str, selected: bool) -> Self {
+        let color = if selected {
             crate::chrome::FOREGROUND
         } else {
             crate::chrome::MUTED
@@ -153,6 +151,7 @@ pub(super) fn row_button(
             .truncate()
             .min_size(rect.size()),
     );
+    ui.visuals_mut().widgets.inactive.fg_stroke.color = foreground;
     ui.visuals_mut().widgets.hovered.fg_stroke.color = hovered;
     ui.visuals_mut().widgets.active.fg_stroke.color = active;
     ui.visuals_mut().widgets.open.fg_stroke.color = open;
@@ -160,12 +159,19 @@ pub(super) fn row_button(
 }
 
 pub(super) fn row_icon(ui: &mut egui::Ui, rect: egui::Rect, glyph: char) -> egui::Response {
-    crate::chrome::icon_button_at(
-        ui,
-        rect,
-        egui::Button::new(egui::RichText::new(glyph.to_string()).font(crate::fonts::icon_font()))
+    ui.scope(|ui| {
+        ui.visuals_mut().widgets.inactive.fg_stroke.color = crate::chrome::MUTED;
+        ui.visuals_mut().widgets.hovered.fg_stroke.color = crate::chrome::FOREGROUND;
+        crate::chrome::icon_button_at(
+            ui,
+            rect,
+            egui::Button::new(
+                egui::RichText::new(glyph.to_string()).font(crate::fonts::icon_font()),
+            )
             .frame(false),
-    )
+        )
+    })
+    .inner
 }
 
 // ScrollArea paints and registers the floating bar after its children, so its
@@ -174,4 +180,99 @@ pub(super) fn overlay_scroll_bar(ui: &mut egui::Ui) {
     crate::scroll_style::control_style(ui.style_mut());
     ui.spacing_mut().scroll.floating = true;
     ui.spacing_mut().scroll.floating_allocated_width = 0.0;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn row_states_keep_selection_hover_text_and_keycaps_distinct() {
+        for density in [1.0, 1.25, 2.0] {
+            let context = crate::fonts::test_context();
+            context.set_pixels_per_point(density);
+            context.global_style_mut(crate::chrome::style);
+            let rows = [0.0, 26.0].map(|y| {
+                egui::Rect::from_min_size(egui::pos2(20.0, 30.0 + y), egui::vec2(240.0, 24.0))
+            });
+            let mut output = egui::FullOutput::default();
+            for _ in 0..3 {
+                output = context.run_ui(
+                    egui::RawInput {
+                        events: vec![egui::Event::PointerMoved(rows[1].center())],
+                        ..Default::default()
+                    },
+                    |ui| {
+                        ui.visuals_mut().disabled_alpha = 1.0;
+                        for (index, rect) in rows.into_iter().enumerate() {
+                            let mut row =
+                                ui.new_child(egui::UiBuilder::new().id_salt(index).max_rect(rect));
+                            let slot = row.painter().add(egui::Shape::Noop);
+                            let selected = index == 0;
+                            let response = row_button(
+                                &mut row,
+                                rect,
+                                selected,
+                                egui::Atoms::new((
+                                    ["Selected", "Hovered"][index],
+                                    egui::Atom::grow(),
+                                )),
+                            );
+                            row.painter()
+                                .set(slot, row_background(&row, rect, &response, selected));
+                            Keycaps::new(&row, "Ctrl+K", selected).paint(&row, rect, selected);
+                        }
+                    },
+                );
+            }
+            for (index, expected) in [crate::chrome::SURFACE, crate::chrome::FLOATING_BACKGROUND]
+                .into_iter()
+                .enumerate()
+            {
+                assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                    egui::Shape::Rect(background) if background.rect == rows[index] && background.fill == expected)));
+            }
+            for (index, expected) in [crate::chrome::FOREGROUND, crate::chrome::MUTED]
+                .into_iter()
+                .enumerate()
+            {
+                let text = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text)
+                            if text.galley.text() == ["Selected", "Hovered"][index] =>
+                        {
+                            Some(text)
+                        }
+                        _ => None,
+                    })
+                    .expect("row label");
+                assert_eq!(
+                    text.override_text_color.unwrap_or(text.fallback_color),
+                    expected
+                );
+                let cap = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text)
+                            if text.galley.text() == "Ctrl" && rows[index].contains(text.pos) =>
+                        {
+                            Some(text)
+                        }
+                        _ => None,
+                    })
+                    .expect("keycap");
+                assert_eq!(
+                    cap.galley.job.sections[0].format.color,
+                    if index == 0 {
+                        crate::chrome::FOREGROUND
+                    } else {
+                        crate::chrome::MUTED
+                    }
+                );
+            }
+        }
+    }
 }

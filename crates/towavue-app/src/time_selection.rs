@@ -296,6 +296,23 @@ pub(super) fn show_in_view(
                 point
             }
         };
+        if matches!(mode, Gesture::Seek) {
+            layout.suppress_hover(ui.ctx());
+        }
+        let snap_selection = |point, x: f32| {
+            if ui.input(|input| input.modifiers.shift)
+                && let Some(range) = selection
+            {
+                let edge = [range.start(), range.end()]
+                    .into_iter()
+                    .min_by(|a, b| (x - x_at(*a)).abs().total_cmp(&(x - x_at(*b)).abs()))
+                    .expect("two selection edges");
+                if (x - x_at(edge)).abs() <= 5.0 {
+                    return edge;
+                }
+            }
+            point
+        };
         let mut began_selection = drag.started && matches!(mode, Gesture::Select);
         if let Gesture::Band(range, gain) = mode
             && let Some(direction) = drag.direction
@@ -413,6 +430,8 @@ pub(super) fn show_in_view(
             if !matches!(mode, Gesture::Band(..)) || drag.released {
                 head = if matches!(mode, Gesture::Select) {
                     snap(at(origin.x), origin.x)
+                } else if matches!(mode, Gesture::Seek) {
+                    snap_selection(at(pointer.x), pointer.x)
                 } else {
                     at(pointer.x)
                 };

@@ -70,6 +70,7 @@ fn media_reference_layouts_reach_the_gpu() {
                     "image-deleted",
                     "image-reading",
                     "image-palette",
+                    "image-palette-search",
                     "image-files",
                     "image-options",
                     "image-languages",
@@ -92,8 +93,10 @@ fn media_reference_layouts_reach_the_gpu() {
                         fonts::install(&context);
                     }
                     let menu_scene = scene.ends_with("-menu");
-                    let palette_scene =
-                        matches!(scene, "image-palette" | "image-files" | "image-options");
+                    let palette_scene = matches!(
+                        scene,
+                        "image-palette" | "image-palette-search" | "image-files" | "image-options"
+                    );
                     if menu_scene {
                         context.enable_accesskit();
                     }
@@ -124,6 +127,9 @@ fn media_reference_layouts_reach_the_gpu() {
                     }
                     match scene {
                         "image-palette" => app.dispatch(CommandId::ToggleCommandPalette),
+                        "image-palette-search" => {
+                            app.dispatch(CommandId::ToggleCommandPalette);
+                        }
                         "image-files" => app.dispatch(CommandId::SearchCurrentFiles),
                         "image-options" => {
                             app.dispatch(CommandId::ToggleCommandPalette);
@@ -222,6 +228,22 @@ fn media_reference_layouts_reach_the_gpu() {
                             .entry(egui::ViewportId::ROOT)
                             .or_default()
                             .native_pixels_per_point = Some(density);
+                        if scene == "image-palette-search" && frame == 2 {
+                            input.events.extend([
+                                egui::Event::Key {
+                                    key: egui::Key::A,
+                                    physical_key: None,
+                                    pressed: true,
+                                    repeat: false,
+                                    modifiers: egui::Modifiers {
+                                        ctrl: true,
+                                        command: true,
+                                        ..Default::default()
+                                    },
+                                },
+                                egui::Event::Text(">open".into()),
+                            ]);
+                        }
                         if menu_scene && frame == 2 {
                             input.events.push(egui::Event::AccessKitActionRequest(
                                 egui::accesskit::ActionRequest {
@@ -357,8 +379,8 @@ fn media_reference_layouts_reach_the_gpu() {
                                 .iter()
                                 .filter(|p| p[0] > 180 && p[1] > 180 && p[2] > 180)
                                 .count()
-                                > 200,
-                            "modal text reaches the GPU"
+                                > 50,
+                            "modal title reaches the GPU at the shared twelve-point size"
                         );
                     } else if palette_scene {
                         assert!(app.palette_open);

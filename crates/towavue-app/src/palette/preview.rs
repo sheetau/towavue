@@ -90,10 +90,13 @@ pub(super) fn reserve(ui: &mut Ui) -> Option<(egui::Rect, egui::Response)> {
         .max(0.0);
     let height = (remaining - 88.0).clamp(0.0, crate::media_preview::SIZE.y);
     (height >= 1.0).then(|| {
-        ui.allocate_exact_size(
+        ui.add_space((crate::chrome::PADDING as f32 - ui.spacing().item_spacing.y).max(0.0));
+        let result = ui.allocate_exact_size(
             egui::vec2(ui.available_width(), height),
             egui::Sense::hover(),
-        )
+        );
+        ui.add_space((crate::chrome::PADDING as f32 - ui.spacing().item_spacing.y).max(0.0));
+        result
     })
 }
 

@@ -29,6 +29,17 @@ fn popup_host<R>(
             .id_salt("popup-scroll-edge")
             .max_rect(rect.with_max_x(rect.right() + padding)),
     );
+    // Outer vertical padding is scrolling end space, not a permanent mask.
+    let top = if egui::containers::menu::is_in_menu(ui) {
+        padding
+    } else {
+        0.0
+    };
+    let mut clip = ui.clip_rect();
+    clip.min.y -= top;
+    clip.max.y += padding;
+    host.set_clip_rect(clip);
+    host.visuals_mut().clip_rect_margin = 0.0;
     control_style(host.style_mut());
     host.spacing_mut().scroll.floating = true;
     host.spacing_mut().scroll.floating_allocated_width = 0.0;
@@ -38,6 +49,15 @@ fn popup_host<R>(
     // The bar occupies existing popup padding, not extra popup width.
     ui.advance_cursor_after_rect(used.with_max_x((used.right() - padding).max(used.left())));
     result
+}
+
+fn popup_content_clip(ui: &mut Ui, padding: f32) {
+    let mut clip = ui.clip_rect();
+    if egui::containers::menu::is_in_menu(ui) {
+        clip.min.y -= padding;
+    }
+    clip.max.y += padding;
+    ui.set_clip_rect(clip);
 }
 
 pub(crate) trait ScrollAreaStyle {
@@ -63,6 +83,7 @@ pub(crate) trait ScrollAreaStyle {
     ) -> ScrollAreaOutput<R>;
     fn show_styled<R>(self, ui: &mut Ui, content: impl FnOnce(&mut Ui) -> R)
     -> ScrollAreaOutput<R>;
+    #[cfg(test)]
     fn show_rows_styled<R>(
         self,
         ui: &mut Ui,
@@ -125,7 +146,10 @@ impl ScrollAreaStyle for ScrollArea {
                 right: padding as i8,
                 ..Default::default()
             })
-            .show_styled(host, content)
+            .show_styled(host, |ui| {
+                popup_content_clip(ui, padding);
+                content(ui)
+            })
         })
     }
 
@@ -140,7 +164,10 @@ impl ScrollAreaStyle for ScrollArea {
                 right: padding as i8,
                 ..Default::default()
             })
-            .show_viewport_styled(host, content)
+            .show_viewport_styled(host, |ui, viewport| {
+                popup_content_clip(ui, padding);
+                content(ui, viewport)
+            })
         })
     }
 
@@ -157,7 +184,24 @@ impl ScrollAreaStyle for ScrollArea {
                 right: padding as i8,
                 ..Default::default()
             })
-            .show_rows_styled(host, height, count, content)
+            .show_viewport_styled(host, |ui, viewport| {
+                popup_content_clip(ui, padding);
+                let pitch = height + ui.spacing().item_spacing.y;
+                ui.set_height((count as f32 * pitch - ui.spacing().item_spacing.y).max(0.0));
+                let start =
+                    (((viewport.top() - padding).max(0.0) / pitch).floor() as usize).min(count);
+                let end = (((viewport.bottom() + padding) / pitch).ceil() as usize + 1).min(count);
+                let origin = ui.max_rect().top();
+                let rect = Rect::from_x_y_ranges(
+                    ui.max_rect().x_range(),
+                    origin + start as f32 * pitch..=origin + end as f32 * pitch,
+                );
+                ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+                    ui.skip_ahead_auto_ids(start);
+                    content(ui, start..end)
+                })
+                .inner
+            })
         })
     }
 
@@ -174,6 +218,7 @@ impl ScrollAreaStyle for ScrollArea {
         })
     }
 
+    #[cfg(test)]
     fn show_rows_styled<R>(
         self,
         ui: &mut Ui,
@@ -238,6 +283,62 @@ impl ScrollAreaStyle for ScrollArea {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn menu_end_padding_scrolls_out_without_masking_partial_rows() {
+        for density in [1.0, 1.25, 2.0] {
+            let context = crate::fonts::test_context();
+            context.global_style_mut(crate::chrome::style);
+            context.set_pixels_per_point(density);
+            for offset in [0.0, 12.0, 60.0] {
+                let mut rows = Vec::new();
+                let mut frame = Rect::NOTHING;
+                for _ in 0..5 {
+                    rows.clear();
+                    let _ = context.run_ui(Default::default(), |ui| {
+                        let opener = ui.button("Open");
+                        frame = egui::Popup::menu(&opener)
+                            .style(crate::chrome::menu_style)
+                            .open(true)
+                            .show(|ui| {
+                                ui.set_width(160.0);
+                                ScrollArea::vertical()
+                                    .max_height(80.0)
+                                    .auto_shrink([false, false])
+                                    .vertical_scroll_offset(offset)
+                                    .show_rows_popup_styled(ui, 3.0, 22.0, 20, |ui, indices| {
+                                        for index in indices {
+                                            let (rect, _) = ui.allocate_exact_size(
+                                                egui::vec2(140.0, 22.0),
+                                                egui::Sense::hover(),
+                                            );
+                                            rows.push((index, rect, ui.clip_rect()));
+                                        }
+                                    });
+                            })
+                            .expect("menu")
+                            .response
+                            .rect;
+                    });
+                }
+                let tolerance = 1.0 / density;
+                if offset == 0.0 {
+                    assert!((rows[0].1.top() - frame.top() - 3.0).abs() <= tolerance);
+                } else {
+                    let (_, row, clip) = rows
+                        .iter()
+                        .find(|(_, row, _)| row.top() < frame.top() && row.bottom() > frame.top())
+                        .expect("partially visible leading row");
+                    assert!(clip.top() <= frame.top() + tolerance);
+                    assert!(row.intersect(*clip).height() > 0.0);
+                }
+                assert!(
+                    rows.iter()
+                        .all(|(_, _, clip)| clip.bottom() >= frame.bottom() - tolerance)
+                );
+            }
+        }
+    }
 
     #[test]
     fn popup_scrollbars_touch_the_border_without_moving_rows_or_vertical_ends() {

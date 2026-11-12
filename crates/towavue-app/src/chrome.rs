@@ -9,13 +9,17 @@ use crate::hover_help::HoverHelp;
 mod input_tests;
 #[cfg(test)]
 mod menu_tests;
+#[cfg(test)]
+mod visual_contract_tests;
 
 mod dropdown;
 mod menu_rows;
 pub(crate) use menu_rows::{MenuRows, check_mark, menu_checkbox, menu_radio};
 mod modal;
 pub use dropdown::Dropdown;
-pub use modal::{modal, modal_actions, modal_body, set_modal_bounds};
+pub use modal::{
+    modal, modal_actions, modal_body, modal_description, modal_group_gap, set_modal_bounds,
+};
 
 mod reading_icon;
 mod tab_audio_fade;
@@ -171,10 +175,12 @@ pub fn tab_close_visible(ui: &mut Ui, rect: Rect, dirty: bool, visible: bool) ->
         egui::Align2::CENTER_CENTER,
         glyph,
         crate::fonts::icon_font(),
-        if response.enabled() {
-            ui.visuals().widgets.inactive.fg_stroke.color
-        } else {
+        if !response.enabled() {
             DISABLED
+        } else if response.hovered() {
+            FOREGROUND
+        } else {
+            MUTED
         },
     );
     response
@@ -334,26 +340,36 @@ pub fn number_input(
             ui.visuals_mut().widgets.hovered.bg_stroke = Stroke::NONE;
             ui.visuals_mut().widgets.hovered.weak_bg_fill = SURFACE;
             ui.visuals_mut().widgets.hovered.bg_fill = SURFACE;
-            let layout = egui::Layout::centered_and_justified(ui.layout().main_dir());
+            let layout = egui::Layout::left_to_right(egui::Align::Center)
+                .with_main_align(egui::Align::Min)
+                .with_cross_justify(true)
+                .with_main_justify(true);
             ui.allocate_ui_with_layout(egui::vec2(width, INPUT_HEIGHT), layout, |ui| {
-            let id = ui.next_auto_id();
-            ui.input_mut(|input| input.consume_accesskit_action_requests(id, |request| {
-                matches!(request.data, Some(egui::accesskit::ActionData::NumericValue(value)) if !value.is_finite())
-            }));
-            ui.add(
-                egui::DragValue::from_get_set(|next| {
-                    if let Some(next) = next.filter(|v| v.is_finite()) {
-                        *value = next;
-                    }
-                    *value
-                })
-                .range(range)
-                .speed(0.1)
-                .fixed_decimals(1)
-                .suffix(suffix)
-                .custom_parser(|text| text.trim().parse::<f64>().ok().filter(|v| v.is_finite())),
-            )
-            }).inner
+                let id = ui.next_auto_id();
+                ui.input_mut(|input| {
+                    input.consume_accesskit_action_requests(id, |request| {
+                        matches!(request.data,
+                            Some(egui::accesskit::ActionData::NumericValue(value))
+                                if !value.is_finite())
+                    });
+                });
+                ui.add(
+                    egui::DragValue::from_get_set(|next| {
+                        if let Some(next) = next.filter(|v| v.is_finite()) {
+                            *value = next;
+                        }
+                        *value
+                    })
+                    .range(range)
+                    .speed(0.1)
+                    .fixed_decimals(1)
+                    .suffix((egui::Atom::grow(), suffix))
+                    .custom_parser(|text| {
+                        text.trim().parse::<f64>().ok().filter(|v| v.is_finite())
+                    }),
+                )
+            })
+            .inner
         })
         .inner;
     ui.ctx()
@@ -410,8 +426,14 @@ pub fn menu_style(style: &mut egui::Style) {
     style.visuals.disabled_alpha = 1.0;
     style.visuals.widgets.noninteractive.fg_stroke.color = DISABLED;
     style.visuals.window_stroke = Stroke::NONE;
+    style.override_font_id = Some(egui::FontId::proportional(TEXT_MD));
+    for text in [egui::TextStyle::Body, egui::TextStyle::Button] {
+        style
+            .text_styles
+            .insert(text, egui::FontId::proportional(TEXT_MD));
+    }
     style.spacing.interact_size.y = CONTROL_HEIGHT;
-    style.spacing.button_padding = egui::vec2(6.0, 2.0);
+    style.spacing.button_padding = egui::vec2(5.0, 2.0);
     style.spacing.item_spacing.y = ITEM_GAP;
     for visual in [
         &mut style.visuals.widgets.noninteractive,
@@ -435,23 +457,31 @@ pub fn combo_box<R>(
     combo: egui::ComboBox,
     contents: impl FnOnce(&mut Ui) -> R,
 ) -> egui::InnerResponse<Option<R>> {
-    combo_box_impl(ui, combo, None, contents)
+    combo_box_impl(ui, combo, None, None, contents)
 }
 
 pub fn labeled_combo_box<R>(
     ui: &mut Ui,
     label: &str,
     label_width: f32,
+    field_width: f32,
     combo: egui::ComboBox,
     contents: impl FnOnce(&mut Ui) -> R,
 ) -> egui::InnerResponse<Option<R>> {
-    combo_box_impl(ui, combo, Some((label, label_width)), contents)
+    combo_box_impl(
+        ui,
+        combo,
+        Some((label, label_width)),
+        Some(field_width),
+        contents,
+    )
 }
 
 fn combo_box_impl<R>(
     ui: &mut Ui,
     combo: egui::ComboBox,
     label: Option<(&str, f32)>,
+    field_width: Option<f32>,
     contents: impl FnOnce(&mut Ui) -> R,
 ) -> egui::InnerResponse<Option<R>> {
     let label = label.map(|(text, width)| {
@@ -473,6 +503,11 @@ fn combo_box_impl<R>(
             flat_buttons(ui);
             ui.spacing_mut().interact_size.y = CONTROL_HEIGHT;
             ui.spacing_mut().button_padding.y = 2.0;
+            if let Some(width) = field_width {
+                ui.set_width(width);
+            }
+            ui.spacing_mut().icon_width = ICON_SIZE;
+            ui.spacing_mut().icon_spacing = PADDING as f32;
             combo
                 .icon(move |ui, rect, visuals, _| {
                     // ComboBox centers its label and icon in the same content rect.
@@ -602,7 +637,7 @@ pub const TAB_AUDIO_WIDTH: f32 = 24.0;
 pub fn tab_audio_button(
     ui: &Ui,
     rect: Rect,
-    active: bool,
+    _active: bool,
     muted: bool,
     name: &str,
     opacity: f32,
@@ -630,10 +665,10 @@ pub fn tab_audio_button(
         egui::Align2::CENTER_CENTER,
         icon.text(),
         crate::fonts::icon_font(),
-        (if active {
+        (if response.hovered() {
             FOREGROUND
         } else {
-            ui.visuals().widgets.inactive.fg_stroke.color
+            MUTED
         })
         .gamma_multiply(opacity),
     );
@@ -648,7 +683,7 @@ pub fn button(ui: &mut Ui, icon: Icon, label: &str) -> egui::Response {
 pub(super) fn status_text_button_size(ui: &Ui, label: &str) -> egui::Vec2 {
     let text = ui.painter().layout_no_wrap(
         label.into(),
-        egui::FontId::proportional(crate::chrome::TEXT_MD),
+        egui::FontId::proportional(crate::chrome::TEXT_LG),
         FOREGROUND,
     );
     egui::vec2((text.size().x + 12.0).max(54.0), STATUS_BUTTON_SIZE)

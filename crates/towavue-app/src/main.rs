@@ -6844,7 +6844,7 @@ where
                         let compact = ui.max_rect().width() < 340.0;
                         let mut time_text = egui::text::LayoutJob::default();
                         let format = egui::TextFormat {
-                            font_id: egui::FontId::proportional(crate::chrome::TEXT_MD),
+                            font_id: egui::FontId::proportional(crate::chrome::TEXT_LG),
                             color: chrome::MUTED,
                             ..Default::default()
                         };
@@ -6900,7 +6900,7 @@ where
                                             "{:.0}%",
                                             self.playback_volume() * 100.0
                                         ))
-                                        .size(chrome::TEXT_MD)
+                                        .size(chrome::TEXT_LG)
                                     }
                                     .color(chrome::MUTED),
                                 ),
@@ -6971,7 +6971,7 @@ where
                             ui.add(
                                 egui::Label::new(
                                     RichText::new(position)
-                                        .size(crate::chrome::TEXT_MD)
+                                        .size(crate::chrome::TEXT_LG)
                                         .color(chrome::MUTED),
                                 )
                                 .truncate()
@@ -7151,7 +7151,7 @@ where
                                 job.into()
                             } else {
                                 RichText::new(text)
-                                    .size(crate::chrome::TEXT_MD)
+                                    .size(crate::chrome::TEXT_LG)
                                     .color(color)
                                     .into()
                             };
@@ -7562,6 +7562,10 @@ where
                     .and_then(PlaybackSession::source_video_frame_rate)
                     .filter(|fps| fps.is_finite() && *fps > 0.0)
                     .unwrap_or(100.0);
+                ui.set_clip_rect(
+                    ui.clip_rect()
+                        .expand2(egui::vec2(chrome::PADDING as f32, 0.0)),
+                );
                 let layout = timeline_view::show(
                     ui,
                     panel.with(&self.path),
@@ -16897,7 +16901,7 @@ mod tests {
                             (background.top() - borders[1] - 26.0).abs() <= 1.0 / density,
                             "density={density}, background={background:?}, borders={borders:?}"
                         );
-                        assert!((background.bottom() - 256.0).abs() <= 1.0 / density);
+                        assert!((background.bottom() - 255.0).abs() <= 1.0 / density);
                         let track = background;
                         let waveform = output
                             .shapes
@@ -17410,10 +17414,10 @@ mod tests {
         app.pending_guard = Some(GuardedAction::CloseTab(tab));
         let history = app.edits[&tab].clone();
         for (tabs, reverse, activation, expected) in [
-            (1, false, egui::Key::Enter, GuardDecision::Save),
+            (1, false, egui::Key::Enter, GuardDecision::Cancel),
             (2, false, egui::Key::Enter, GuardDecision::Discard),
-            (3, false, egui::Key::Enter, GuardDecision::Cancel),
-            (1, true, egui::Key::Space, GuardDecision::Cancel),
+            (3, false, egui::Key::Enter, GuardDecision::Save),
+            (1, true, egui::Key::Space, GuardDecision::Save),
         ] {
             let context = fonts::test_context();
             let run = |events| {

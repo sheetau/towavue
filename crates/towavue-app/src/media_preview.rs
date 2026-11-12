@@ -342,7 +342,7 @@ impl Preview {
             .show(context, |ui| {
                 ui.style_mut().interaction.selectable_labels = false;
                 egui::Frame::popup(ui.style())
-                    .stroke(egui::Stroke::new(1.0, crate::chrome::FLOATING_BACKGROUND))
+                    .stroke(egui::Stroke::new(1.0, crate::chrome::BORDER))
                     .inner_margin(0)
                     .show(ui, |ui| {
                         ui.set_width(width);
@@ -727,7 +727,7 @@ mod tests {
                     );
                 }
                 let tolerance = 1.0 / density;
-                let border = crate::hover_help::frame(&context.global_style()).stroke;
+                let border = egui::Stroke::new(1.0, crate::chrome::BORDER);
                 assert!((pixels.top() - card.top() - border.width).abs() <= tolerance);
                 assert!((pixels.left() - card.left() - border.width).abs() <= tolerance);
                 assert!((card.right() - pixels.right() - border.width).abs() <= tolerance);
@@ -741,7 +741,7 @@ mod tests {
                         })
                         .any(|shape| matches!(shape, egui::Shape::Rect(rect)
                     if rect.rect == card && rect.stroke == border)),
-                    "use the same border as ordinary tooltips"
+                    "preview cards retain their own border"
                 );
                 assert!((label.top() - pixels.bottom() - 4.0).abs() <= tolerance);
                 if seek {

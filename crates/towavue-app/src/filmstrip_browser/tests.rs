@@ -2190,7 +2190,7 @@ fn folder_status_menus_size_to_their_current_message() {
                 });
             }
             assert!(
-                (measured.0 - measured.1 - (12.0 + 2.0 * f32::from(chrome::MENU_PADDING))).abs()
+                (measured.0 - measured.1 - (10.0 + 2.0 * f32::from(chrome::MENU_PADDING))).abs()
                     <= 2.0 / density,
                 "message width plus row padding and frame: {measured:?}"
             );

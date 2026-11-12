@@ -52,7 +52,7 @@ pub fn content<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
 pub fn frame(style: &egui::Style) -> egui::Frame {
     egui::Frame::popup(style)
         .inner_margin(PADDING)
-        .stroke(egui::Stroke::new(1.0, crate::chrome::FLOATING_BACKGROUND))
+        .stroke(egui::Stroke::NONE)
 }
 
 pub fn filename(ui: &Ui, text: String, width: f32) -> std::sync::Arc<egui::Galley> {

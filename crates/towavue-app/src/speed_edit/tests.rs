@@ -14,7 +14,16 @@ fn duration_text_round_trips_nanoseconds_and_rejects_invalid_or_overflowing_inpu
         let value = MediaTime::from_nanoseconds(nanos);
         assert_eq!(parse_duration(&format_duration(value)), Some(value));
     }
-    assert_eq!(format_duration(time(125)), "2:05");
+    assert_eq!(format_duration(time(125)), "2:05:000");
+    assert_eq!(
+        parse_duration("1:02:03:500"),
+        Some(MediaTime::from_nanoseconds(3_723_500_000_000))
+    );
+    assert_eq!(
+        parse_duration("2:05:123456789"),
+        Some(MediaTime::from_nanoseconds(125_123_456_789))
+    );
+    assert_eq!(parse_duration("1:02:03"), Some(time(3723)));
     assert_eq!(
         parse_duration("2:05.123456789"),
         Some(MediaTime::from_nanoseconds(125_123_456_789))
@@ -27,7 +36,6 @@ fn duration_text_round_trips_nanoseconds_and_rejects_invalid_or_overflowing_inpu
         "00:00:60",
         "-1:00:00",
         "NaN",
-        "1:2:3:4",
         "1:00:00.0000000001",
         "999999999999999999:00:00",
     ] {
@@ -282,7 +290,7 @@ fn dialog_controls_link_inputs_fit_media_bounds_and_emit_one_action() {
                 assert!(
                     tree.nodes
                         .iter()
-                        .any(|(_, node)| node.value() == Some("0:05"))
+                        .any(|(_, node)| node.value() == Some("0:05:000"))
                 );
                 let (output, actions) = frame(
                     &context,

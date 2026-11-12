@@ -164,7 +164,12 @@ impl CommandPalette {
                     let ui = &mut row_ui;
                     let selected = selected == Some(index);
                     let atoms = egui::Atoms::new((
-                        row.label.as_str(),
+                        highlight::label(
+                            &row.label,
+                            &query,
+                            crate::chrome::TEXT_MD,
+                            egui::Color32::PLACEHOLDER,
+                        ),
                         egui::Atom::grow(),
                         egui::Atom::default().atom_size(egui::Vec2::splat(20.0)),
                     ));

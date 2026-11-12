@@ -444,7 +444,7 @@ fn paint_only_month_help_does_not_intercept_underlying_clicks() {
         let reference = context.fonts_mut(|fonts| {
             fonts.layout_no_wrap(
                 "H".into(),
-                egui::FontId::proportional(12.0),
+                egui::FontId::proportional(chrome::TEXT_MD),
                 chrome::FOREGROUND,
             )
         });

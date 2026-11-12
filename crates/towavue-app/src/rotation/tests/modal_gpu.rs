@@ -20,7 +20,7 @@ fn editing_modals_reach_gpu_at_three_densities() {
             let mut renderer = FrameRenderer::new(&window).expect("D3D11");
             for density in [1.0, 1.25, 2.0] {
                 for size in [egui::vec2(960.0, 600.0), egui::vec2(320.0, 240.0)] {
-                    for phase in ["resize", "rotate", "audio", "speed"] {
+                    for phase in ["resize", "rotate", "audio", "speed", "metadata"] {
                         let (mut app, _events) = application();
                         let context = app.ui_context.clone().expect("context");
                         context.global_style_mut(chrome::style);
@@ -48,10 +48,22 @@ fn editing_modals_reach_gpu_at_three_densities() {
                             "resize" => CommandId::ResizeImage,
                             "rotate" => CommandId::FreeRotateImage,
                             "audio" => CommandId::AudioExportOptions,
+                            "metadata" => CommandId::MetadataExportOptions,
                             _ => CommandId::EditSpeed,
                         });
                         if phase == "resize" {
                             app.resize_dialog = Some(resize::ResizeDialog::new((640, 480), 1));
+                        }
+                        if phase == "metadata" {
+                            app.finish_metadata_read(
+                                app.metadata_generation,
+                                Ok(vec![towavue_runtime_windows::MetadataSourceValue {
+                                    field: towavue_runtime_windows::MetadataField::Title,
+                                    scope: towavue_runtime_windows::MetadataSourceScope::File,
+                                    value: "Generated title".into(),
+                                    truncated: false,
+                                }]),
+                            );
                         }
                         assert!(app.modal_input_blocked(), "{phase}");
                         let width = (size.x * density) as u32;

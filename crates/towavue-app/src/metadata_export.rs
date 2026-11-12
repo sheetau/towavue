@@ -139,7 +139,10 @@ impl MetadataDialog {
                     Text::Cancel.in_language(display_language),
                 ],
                 |ui| {
-                    ui.label(Text::MetadataField.in_language(display_language));
+                    chrome::modal_description(
+                        ui,
+                        Text::MetadataField.in_language(display_language),
+                    );
                     let response = chrome::combo_box(
                         ui,
                         egui::ComboBox::from_id_salt("metadata-field").selected_text(
@@ -261,11 +264,14 @@ impl MetadataDialog {
                             .inner;
                         reveal_focus(&response);
                     }
-                    crate::chrome::separator(ui);
+                    chrome::modal_group_gap(ui);
                     ui.label(Text::CurrentSourceValues.in_language(display_language));
                     match &self.current {
                         None => {
-                            ui.label(Text::ReadingMetadata.in_language(display_language));
+                            chrome::modal_description(
+                                ui,
+                                Text::ReadingMetadata.in_language(display_language),
+                            );
                         }
                         Some(Err(error)) => {
                             ui.label(formatted::metadata_read_failed(display_language, error));
@@ -274,16 +280,19 @@ impl MetadataDialog {
                             let mut found = false;
                             for value in values.iter().filter(|value| value.field == field) {
                                 found = true;
-                                ui.label(format!(
-                                    "{}{}: {}",
-                                    value.scope.message(display_language),
-                                    if value.truncated {
-                                        Text::TruncatedSuffix.in_language(display_language)
-                                    } else {
-                                        ""
-                                    },
-                                    value.value
-                                ));
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "{}{}: {}",
+                                        value.scope.message(display_language),
+                                        if value.truncated {
+                                            Text::TruncatedSuffix.in_language(display_language)
+                                        } else {
+                                            ""
+                                        },
+                                        value.value
+                                    ))
+                                    .color(chrome::FAINT),
+                                );
                             }
                             if !found {
                                 ui.label(if self.kind == MediaKind::Image {
@@ -294,30 +303,81 @@ impl MetadataDialog {
                             }
                         }
                     }
-                    crate::chrome::separator(ui);
+                    chrome::modal_group_gap(ui);
                     if image_format == Some(ImageMetadataFormat::Png) {
-                        ui.label(Text::PngMetadataScope.in_language(display_language));
-                        ui.label(Text::PngMetadataFieldsHelp.in_language(display_language));
-                        ui.label(Text::PngMetadataPreservationHelp.in_language(display_language));
-                        ui.label(Text::PngMetadataLimitsHelp.in_language(display_language));
-                        ui.label(Text::ApngMetadataHelp.in_language(display_language));
+                        chrome::modal_description(
+                            ui,
+                            Text::PngMetadataScope.in_language(display_language),
+                        );
+                        chrome::modal_description(
+                            ui,
+                            Text::PngMetadataFieldsHelp.in_language(display_language),
+                        );
+                        chrome::modal_description(
+                            ui,
+                            Text::PngMetadataPreservationHelp.in_language(display_language),
+                        );
+                        chrome::modal_description(
+                            ui,
+                            Text::PngMetadataLimitsHelp.in_language(display_language),
+                        );
+                        chrome::modal_description(
+                            ui,
+                            Text::ApngMetadataHelp.in_language(display_language),
+                        );
                     } else if image_format == Some(ImageMetadataFormat::Jpeg) {
-                        ui.label(Text::JpegMetadataScope.in_language(display_language));
-                        ui.label(Text::JpegMetadataPreservationHelp.in_language(display_language));
-                        ui.label(Text::JpegXmpFieldsHelp.in_language(display_language));
-                        ui.label(Text::JpegXmpLimitsHelp.in_language(display_language));
+                        chrome::modal_description(
+                            ui,
+                            Text::JpegMetadataScope.in_language(display_language),
+                        );
+                        chrome::modal_description(
+                            ui,
+                            Text::JpegMetadataPreservationHelp.in_language(display_language),
+                        );
+                        chrome::modal_description(
+                            ui,
+                            Text::JpegXmpFieldsHelp.in_language(display_language),
+                        );
+                        chrome::modal_description(
+                            ui,
+                            Text::JpegXmpLimitsHelp.in_language(display_language),
+                        );
                     } else if image_format == Some(ImageMetadataFormat::Webp) {
-                        ui.label(Text::WebpMetadataScope.in_language(display_language));
-                        ui.label(Text::WebpMetadataPreservationHelp.in_language(display_language));
-                        ui.label(Text::WebpXmpFieldsHelp.in_language(display_language));
-                        ui.label(Text::WebpXmpLimitsHelp.in_language(display_language));
+                        chrome::modal_description(
+                            ui,
+                            Text::WebpMetadataScope.in_language(display_language),
+                        );
+                        chrome::modal_description(
+                            ui,
+                            Text::WebpMetadataPreservationHelp.in_language(display_language),
+                        );
+                        chrome::modal_description(
+                            ui,
+                            Text::WebpXmpFieldsHelp.in_language(display_language),
+                        );
+                        chrome::modal_description(
+                            ui,
+                            Text::WebpXmpLimitsHelp.in_language(display_language),
+                        );
                     } else if self.kind == MediaKind::Image {
-                        ui.label(Text::ImageMetadataFormatsHelp.in_language(display_language));
+                        chrome::modal_description(
+                            ui,
+                            Text::ImageMetadataFormatsHelp.in_language(display_language),
+                        );
                     } else {
-                        ui.label(Text::MediaMetadataScope.in_language(display_language));
-                        ui.label(Text::MediaMetadataPreservationHelp.in_language(display_language));
+                        chrome::modal_description(
+                            ui,
+                            Text::MediaMetadataScope.in_language(display_language),
+                        );
+                        chrome::modal_description(
+                            ui,
+                            Text::MediaMetadataPreservationHelp.in_language(display_language),
+                        );
                     }
-                    ui.label(Text::MetadataLimitsHelp.in_language(display_language));
+                    chrome::modal_description(
+                        ui,
+                        Text::MetadataLimitsHelp.in_language(display_language),
+                    );
                     if let Err(error) = self.options_in(display_language) {
                         ui.label(error);
                     }

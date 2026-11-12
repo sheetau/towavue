@@ -97,7 +97,7 @@ impl ResizeDialog {
                 }
                 link_slot = ui
                     .allocate_exact_size(
-                        egui::vec2(32.0, chrome::INPUT_HEIGHT),
+                        egui::vec2(chrome::ROW_HEIGHT, chrome::INPUT_HEIGHT),
                         egui::Sense::hover(),
                     )
                     .0;
@@ -117,12 +117,13 @@ impl ResizeDialog {
                 {
                     self.width = self.round(f64::from(value) * self.ratio);
                 }
-                ui.allocate_space(egui::vec2(32.0, chrome::INPUT_HEIGHT));
+                ui.allocate_space(egui::vec2(chrome::ROW_HEIGHT, chrome::INPUT_HEIGHT));
                 ui.end_row();
                 let filter = chrome::labeled_combo_box(
                     ui,
                     labels[2],
                     label_width,
+                    field_width,
                     egui::ComboBox::from_id_salt("resize-resample")
                         .truncate()
                         .width(field_width)
@@ -166,9 +167,7 @@ impl ResizeDialog {
             });
         let top = dimensions[0].center().y;
         let bottom = dimensions[1].center().y;
-        let x = link_slot.left() + 2.0;
-        let center = egui::pos2(link_slot.center().x + 2.0, (top + bottom) * 0.5);
-        let stroke = egui::Stroke::new(1.0, chrome::MUTED);
+        let center = egui::pos2(link_slot.center().x, (top + bottom) * 0.5);
         let rect =
             egui::Rect::from_center_size(center, egui::Vec2::splat(chrome::SEARCH_BUTTON_SIZE));
         let response = ui.place(
@@ -182,17 +181,6 @@ impl ResizeDialog {
             {
                 self.height = self.round(f64::from(value) / self.ratio);
             }
-        }
-        if self.keep_ratio {
-            ui.painter().add(egui::Shape::line(
-                vec![
-                    egui::pos2(dimensions[0].right() + 2.0, top),
-                    egui::pos2(x, top),
-                    egui::pos2(x, bottom),
-                    egui::pos2(dimensions[1].right() + 2.0, bottom),
-                ],
-                stroke,
-            ));
         }
         response.widget_info(|| {
             egui::WidgetInfo::selected(
@@ -253,7 +241,10 @@ impl ResizeDialog {
                     self.controls(ui);
                     let value = self.value();
                     if value.is_none() {
-                        ui.label(Text::ImageResizeLimits.in_language(display_language));
+                        chrome::modal_description(
+                            ui,
+                            Text::ImageResizeLimits.in_language(display_language),
+                        );
                         if self.frame_count > 1 {
                             ui.label(
                                 towavue_core::localization::formatted::animation_resize_budget(

@@ -20,6 +20,7 @@ mod options;
 mod search;
 mod state;
 pub(crate) use options::Value;
+mod highlight;
 mod preview;
 mod row;
 use row::{RowActions, label_gap, overlay_scroll_bar, row_button, row_icon};
@@ -326,7 +327,6 @@ impl CommandPalette {
             .show(context, |ui| {
                 ui.spacing_mut().scroll.fade.strength = 0.0;
                 ui.visuals_mut().disabled_alpha = 1.0;
-                ui.visuals_mut().widgets.noninteractive.fg_stroke.color = crate::chrome::DISABLED;
                 ui.set_width((context.content_rect().width() - 50.0).clamp(120.0, 586.0));
                 ui.spacing_mut().item_spacing =
                     egui::vec2(crate::chrome::PADDING as f32, crate::chrome::ITEM_GAP);
@@ -345,8 +345,10 @@ impl CommandPalette {
                 let mut back = false;
                 ui.horizontal(|ui| {
                     if self.step.is_some() {
-                        let (_, rect) =
-                            ui.allocate_space(egui::Vec2::splat(crate::chrome::ROW_HEIGHT));
+                        let (_, rect) = ui.allocate_space(egui::vec2(
+                            crate::chrome::ICON_SIZE,
+                            crate::chrome::ROW_HEIGHT,
+                        ));
                         back = row_icon(ui, rect, '\u{eab5}')
                             .on_hover_text(Text::CommandHistoryBack.in_language(language))
                             .clicked();
@@ -354,7 +356,12 @@ impl CommandPalette {
                     ui.add_sized(
                         [ui.available_width(), crate::chrome::ROW_HEIGHT],
                         egui::TextEdit::singleline(&mut self.query)
-                            .frame(egui::Frame::NONE)
+                            .frame(egui::Frame::NONE.inner_margin(egui::Margin {
+                                left: crate::chrome::PADDING,
+                                right: crate::chrome::PADDING,
+                                top: 0,
+                                bottom: 0,
+                            }))
                             .margin(egui::vec2(crate::chrome::PADDING as f32, 0.0))
                             .vertical_align(egui::Align::Center)
                             .id(query_id)
@@ -628,8 +635,9 @@ impl CommandPalette {
                 height
             } else {
                 height.min(self.list_height.max(1.0))
-            };
-            let was_visible = top >= offset - 1.0 && bottom <= offset + self.list_height + 1.0;
+            } + crate::chrome::PADDING as f32;
+            let was_visible = top >= offset - 1.0
+                && bottom <= offset + self.list_height + crate::chrome::PADDING as f32 + 1.0;
             let manual_scroll = ui.input(|input| {
                 input.pointer.any_down()
                     || input
@@ -656,7 +664,9 @@ impl CommandPalette {
                 ui.set_min_height(total_height);
                 for (index, label) in &groups {
                     let top = row_top(*index) - category_height - gap;
-                    if top + category_height >= viewport.top() && top <= viewport.bottom() {
+                    if top + category_height >= viewport.top() - 5.0
+                        && top <= viewport.bottom() + 5.0
+                    {
                         let rect = egui::Rect::from_min_size(
                             origin + egui::vec2(0.0, top),
                             egui::vec2(ui.available_width(), category_height),
@@ -683,7 +693,7 @@ impl CommandPalette {
                 }
                 for (index, path) in paths.iter().enumerate() {
                     let top = row_top(index);
-                    if top + row_height < viewport.top() || top > viewport.bottom() {
+                    if top + row_height < viewport.top() - 5.0 || top > viewport.bottom() + 5.0 {
                         continue;
                     }
                     let path = *path;
@@ -723,13 +733,23 @@ impl CommandPalette {
                     let (name_width, parent_width, _) =
                         file_label_widths(ui, (body.width() - icon_width).max(0.0), &name, "");
                     let mut atoms = egui::Atoms::new((
-                        name.as_ref().atom_max_width(name_width),
+                        highlight::label(
+                            &name,
+                            &query,
+                            crate::chrome::TEXT_MD,
+                            egui::Color32::PLACEHOLDER,
+                        )
+                        .atom_max_width(name_width)
+                        .atom_shrink(false),
                         label_gap(ui),
-                        egui::RichText::new(parent.as_ref())
-                            .size(crate::chrome::TEXT_SM)
-                            .color(crate::chrome::MUTED)
-                            .atom_max_width(parent_width)
-                            .atom_shrink(true),
+                        highlight::label(
+                            &parent,
+                            &query,
+                            crate::chrome::TEXT_SM,
+                            crate::chrome::MUTED,
+                        )
+                        .atom_max_width(parent_width)
+                        .atom_shrink(true),
                         egui::Atom::grow(),
                     ));
                     if icon.is_some() {
@@ -866,18 +886,13 @@ fn row_background(
     if !selected && !hovered && !response.has_focus() && !response.is_pointer_button_down_on() {
         return egui::Shape::Noop;
     }
-    let visuals = if hovered && !selected {
-        ui.visuals().widgets.hovered
-    } else {
-        ui.style().interact_selectable(response, selected)
-    };
     egui::epaint::RectShape::new(
         row,
-        visuals.corner_radius,
+        crate::chrome::RADIUS_XS,
         if selected {
             crate::chrome::SURFACE
         } else {
-            visuals.weak_bg_fill
+            crate::chrome::FLOATING_BACKGROUND
         },
         egui::Stroke::NONE,
         egui::StrokeKind::Inside,
@@ -1913,17 +1928,17 @@ mod tests {
                 .0;
             }
             assert_eq!(
-                picker_text(&output, "recently used").is_some(),
+                picker_text(&output, "RECENTLY USED").is_some(),
                 recent,
                 "{query}"
             );
             assert_eq!(
-                picker_text(&output, "other commands").is_some(),
+                picker_text(&output, "OTHER COMMANDS").is_some(),
                 other,
                 "{query}"
             );
             assert_eq!(
-                picker_text(&output, "similar commands").is_some(),
+                picker_text(&output, "SIMILAR COMMANDS").is_some(),
                 similar,
                 "{query}"
             );
@@ -1977,8 +1992,8 @@ mod tests {
                     output = frame(&mut palette, &history, vec![]).0;
                 }
                 assert_eq!(palette.selected_command, Some(CommandId::OpenFolder));
-                assert!(picker_text(&output, "recently used").is_some());
-                assert!(picker_text(&output, "other commands").is_some());
+                assert!(picker_text(&output, "RECENTLY USED").is_some());
+                assert!(picker_text(&output, "OTHER COMMANDS").is_some());
                 let folder_y = picker_text(&output, "Open folder")
                     .expect("first MRU")
                     .0
@@ -2131,7 +2146,10 @@ mod tests {
                         .collect();
                     let title = |palette: &CommandPalette| -> String {
                         if mode == 0 {
-                            let definition = definitions[palette.selected.expect("selection")];
+                            let definition = definitions
+                                .iter()
+                                .find(|definition| Some(definition.id) == palette.selected_command)
+                                .expect("selected command");
                             options::title(definition.id, localization::Language::English)
                                 .unwrap_or(definition.title)
                                 .into()
@@ -2189,7 +2207,13 @@ mod tests {
                             let expected = old_position.y
                                 + (index - old_index) as f32
                                     * (crate::chrome::ROW_HEIGHT + crate::chrome::ITEM_GAP);
-                            if expected + selected.galley.size().y + 4.0 <= clip.bottom() {
+                            let row_margin =
+                                (crate::chrome::ROW_HEIGHT - selected.galley.size().y) * 0.5;
+                            if expected + selected_clip.top() - clip.top()
+                                + selected.galley.size().y
+                                + row_margin
+                                <= selected_clip.bottom()
+                            {
                                 assert!(
                                     (selected.pos.y - expected - selected_clip.top() + clip.top())
                                         .abs()
@@ -2535,7 +2559,7 @@ mod tests {
             );
             let folder = text("Open folder");
             assert!((file.pos.x - folder.pos.x).abs() < 1.0);
-            assert!(picker_text(&output, "other commands").is_none());
+            assert!(picker_text(&output, "OTHER COMMANDS").is_none());
             for command in [file, folder] {
                 let center = command.pos.y + command.galley.size().y * 0.5;
                 let keys: Vec<_> = output

@@ -4852,7 +4852,7 @@ mod tests {
                             .job
                             .sections
                             .iter()
-                            .all(|section| section.format.font_id.size == 12.0)
+                            .all(|section| section.format.font_id.size == crate::chrome::TEXT_MD)
                     );
                     assert!(
                         (title.pos.x - bounds.x0 as f32 + indicator::GAP).abs() <= 1.0 / density

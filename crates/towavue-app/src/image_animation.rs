@@ -315,7 +315,7 @@ where
         ui.add(
             egui::Label::new(
                 egui::RichText::new(shown)
-                    .size(crate::chrome::TEXT_MD)
+                    .size(crate::chrome::TEXT_LG)
                     .color(chrome::MUTED),
             )
             .truncate()
@@ -724,10 +724,9 @@ mod tests {
                 .job
                 .sections
                 .iter()
-                .all(
-                    |section| section.format.font_id == egui::FontId::proportional(12.0)
-                        && section.format.color == chrome::MUTED
-                )
+                .all(|section| section.format.font_id
+                    == egui::FontId::proportional(chrome::TEXT_LG)
+                    && section.format.color == chrome::MUTED)
         );
         let enabled = |id, context| {
             crate::command_definitions()

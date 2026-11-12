@@ -143,9 +143,9 @@ fn menu_rows_have_symmetric_padding_unclipped_corners_and_square_check_slots() {
                         _ => None,
                     })
                     .expect("test fixture");
-                assert!((text.pos.x - row.left() - row.height() - 6.0).abs() <= 1.0 / density);
+                assert!((text.pos.x - row.left() - row.height() - 5.0).abs() <= 1.0 / density);
                 assert!(
-                    (row.right() - text.pos.x - text.galley.size().x - 6.0).abs() <= 1.0 / density
+                    (row.right() - text.pos.x - text.galley.size().x - 5.0).abs() <= 1.0 / density
                 );
             }
         }

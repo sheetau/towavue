@@ -107,6 +107,182 @@ fn long_media_retains_frame_precision_without_large_virtual_coordinates() {
 }
 
 #[test]
+fn cti_shift_snapping_is_live_and_ruler_hover_waits_for_the_next_pointer_move() {
+    for density in [1.0, 1.25, 2.0] {
+        let context = crate::fonts::test_context();
+        context.set_pixels_per_point(density);
+        context.global_style_mut(crate::chrome::style);
+        let time = |seconds: i64| MediaTime::from_nanoseconds(seconds * 1_000_000_000);
+        let selection = TimeRange::new(time(200), time(400));
+        let origin = egui::pos2(320.0, 108.0);
+        let near_start = egui::pos2(222.0, 108.0);
+        let render = |events, shift| {
+            let mut result = crate::time_selection::Output::default();
+            let mut ruler = Rect::NOTHING;
+            let output = context.run_ui(
+                egui::RawInput {
+                    events,
+                    modifiers: egui::Modifiers {
+                        shift,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                |ui| {
+                    let layout = show(
+                        ui,
+                        egui::Id::new("snap-control"),
+                        Rect::from_min_max(egui::pos2(20.0, 100.0), egui::pos2(620.0, 200.0)),
+                        time(600),
+                        30.0,
+                        true,
+                    );
+                    ruler = layout.ruler;
+                    let response =
+                        ui.allocate_rect(layout.interaction(), egui::Sense::click_and_drag());
+                    result = crate::time_selection::show_in_view(
+                        ui,
+                        &response,
+                        time(600),
+                        time(300),
+                        selection,
+                        None,
+                        true,
+                        layout,
+                    );
+                    paint(
+                        ui,
+                        layout,
+                        30.0,
+                        result.display_position,
+                        result.display_selection,
+                    );
+                },
+            );
+            let hover = output.shapes.iter().any(|shape| match &shape.shape {
+                egui::Shape::Vec(shapes) => shapes.iter().any(|shape| matches!(shape,
+                    egui::Shape::LineSegment { points, stroke } if stroke.color == chrome::FOREGROUND
+                        && points[0].y == ruler.top() && points[1].y == ruler.bottom())),
+                _ => false,
+            });
+            (result, hover)
+        };
+        for _ in 0..3 {
+            render(vec![egui::Event::PointerMoved(origin)], false);
+        }
+        let button = |pos, pressed, shift| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers {
+                shift,
+                ..Default::default()
+            },
+        };
+        assert!(!render(vec![button(origin, true, false)], false).1);
+        let (snapped, hover) = render(vec![egui::Event::PointerMoved(near_start)], true);
+        assert_eq!(snapped.display_position, time(200));
+        assert!(!hover);
+        let (free, _) = render(vec![], false);
+        assert!(
+            free.display_position > time(200),
+            "releasing Shift removes the magnet immediately"
+        );
+        let (released, hover) = render(vec![button(near_start, false, true)], true);
+        assert_eq!(released.seek, Some(time(200)));
+        assert!(!hover);
+        assert!(!render(vec![], false).1);
+        assert!(render(vec![egui::Event::PointerMoved(origin)], false).1);
+    }
+}
+
+#[test]
+fn ruler_labels_and_scrollbar_caps_keep_the_reviewed_geometry() {
+    let context = crate::fonts::test_context();
+    context.global_style_mut(crate::chrome::style);
+    let id = egui::Id::new("ruler-geometry");
+    context.data_mut(|data| {
+        data.insert_temp(
+            id.with("time-viewport"),
+            View {
+                start: 100.0,
+                span: 2.0,
+                duration: 600.0,
+            },
+        )
+    });
+    let mut ruler = Rect::NOTHING;
+    let mut scrollbar = Rect::NOTHING;
+    let output = context.run_ui(Default::default(), |ui| {
+        let layout = show(
+            ui,
+            id,
+            Rect::from_min_max(egui::pos2(20.0, 100.0), egui::pos2(620.0, 200.0)),
+            MediaTime::from_nanoseconds(600_000_000_000),
+            30.0,
+            true,
+        );
+        ruler = layout.ruler;
+        scrollbar = layout.scrollbar;
+        assert_eq!(
+            layout.waveform.left(),
+            15.0,
+            "continuing content reaches the outer edge"
+        );
+        assert_eq!(layout.waveform.right(), 625.0);
+        paint(ui, layout, 30.0, MediaTime::ZERO, None);
+    });
+    let mut ticks = Vec::new();
+    let mut labels = Vec::new();
+    for shape in &output.shapes {
+        if let egui::Shape::Vec(shapes) = &shape.shape {
+            for shape in shapes {
+                match shape {
+                    egui::Shape::LineSegment { points, stroke }
+                        if stroke.color == chrome::FAINT =>
+                    {
+                        ticks.push(points[0].x)
+                    }
+                    egui::Shape::Text(text) => labels.push(text),
+                    _ => {}
+                }
+            }
+        }
+    }
+    assert!(!ticks.is_empty());
+    assert_eq!(ticks.len(), labels.len(), "overlap never removes labels");
+    assert!(ticks.windows(2).all(|pair| pair[1] - pair[0] >= 49.9));
+    for (x, text) in ticks.into_iter().zip(labels) {
+        let bounds = text.galley.rect.translate(text.pos.to_vec2());
+        let expected =
+            (x - bounds.width() * 0.5).clamp(ruler.left(), ruler.right() - bounds.width());
+        assert!((bounds.left() - expected).abs() < 0.01);
+        assert!((text.pos.y + text.galley.mesh_bounds.top() - ruler.top()).abs() < 0.01);
+        assert_eq!(
+            text.galley.job.sections[0].format.font_id.size,
+            chrome::TEXT_SM
+        );
+    }
+    let caps: Vec<_> = output
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::Shape::Rect(rect)
+                if rect.fill == chrome::FAINT && scrollbar.contains_rect(rect.rect) =>
+            {
+                Some(rect)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(caps.len(), 2);
+    assert!(
+        caps.iter()
+            .all(|cap| cap.rect.size() == egui::vec2(5.0, 10.0))
+    );
+}
+
+#[test]
 fn ruler_and_gap_seek_in_edited_time_without_selecting_or_painting_an_offscreen_cti() {
     for gap in [false, true] {
         let context = crate::fonts::test_context();

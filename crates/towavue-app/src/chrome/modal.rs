@@ -6,9 +6,10 @@ const MARGIN: f32 = 8.0;
 const FRAME_SPACE: f32 = 12.0;
 const MAX_CONTENT_WIDTH: f32 = 400.0;
 
-/// Keep action order and keyboard traversal left-to-right while aligning each
-/// wrapped footer row to the content's right edge.
+/// Callers supply the primary action first. Paint cancellation on the left and
+/// the primary action on the right, returning responses in the supplied order.
 pub fn modal_actions(ui: &mut Ui, actions: &[(&str, bool)]) -> Vec<egui::Response> {
+    let actions: Vec<_> = actions.iter().rev().copied().collect();
     super::flat_buttons(ui);
     ui.spacing_mut().item_spacing = egui::vec2(super::PADDING as f32, super::ITEM_GAP);
     ui.spacing_mut().interact_size.y = super::CONTROL_HEIGHT;
@@ -68,14 +69,14 @@ pub fn modal_actions(ui: &mut Ui, actions: &[(&str, bool)]) -> Vec<egui::Respons
             let button = Rect::from_min_size(
                 egui::pos2(
                     x,
-                    rect.top() + row as f32 * (slot_height + gap.y) + slot_height - height,
+                    rect.top() + row as f32 * (slot_height + gap.y) + (slot_height - height) * 0.5,
                 ),
                 egui::vec2(widths[index], height),
             );
             let mut child = ui.new_child(
                 egui::UiBuilder::new()
                     .max_rect(button)
-                    .layout(egui::Layout::top_down_justified(egui::Align::Min)),
+                    .layout(egui::Layout::top_down_justified(egui::Align::Center)),
             );
             if !actions[index].1 {
                 child.disable();
@@ -90,7 +91,25 @@ pub fn modal_actions(ui: &mut Ui, actions: &[(&str, bool)]) -> Vec<egui::Respons
             x += widths[index] + gap.x;
         }
     }
+    responses.reverse();
     responses
+}
+
+/// Adjacent groups each keep five points of padding plus their five-point gap.
+/// Their horizontal inset is supplied by modal_body's shared content frame.
+pub fn modal_group_gap(ui: &mut Ui) {
+    ui.add_space((3.0 * super::PADDING as f32 - ui.spacing().item_spacing.y).max(0.0));
+}
+
+pub fn modal_description(ui: &mut Ui, text: impl Into<String>) -> egui::Response {
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(text.into())
+                .size(super::TEXT_SM)
+                .color(super::FAINT),
+        )
+        .wrap(),
+    )
 }
 
 pub fn set_modal_bounds(context: &Context, bounds: Rect) {
@@ -149,6 +168,12 @@ pub fn modal_body<R>(
     content: impl FnOnce(&mut Ui) -> R,
 ) -> R {
     let bounds = bounds(ui.ctx());
+    ui.style_mut().override_font_id = Some(egui::FontId::proportional(super::TEXT_MD));
+    for text in [egui::TextStyle::Body, egui::TextStyle::Button] {
+        ui.style_mut()
+            .text_styles
+            .insert(text, egui::FontId::proportional(super::TEXT_MD));
+    }
     ui.spacing_mut().item_spacing = egui::vec2(super::PADDING as f32, super::PADDING as f32);
     ui.spacing_mut().interact_size.y = super::CONTROL_HEIGHT;
     ui.spacing_mut().button_padding = egui::vec2(super::PADDING as f32, 2.0);
@@ -171,18 +196,28 @@ pub fn modal_body<R>(
         node.set_label(title);
         node.set_modal();
     });
-    let title = egui::WidgetText::from(egui::RichText::new(title).color(super::FOREGROUND))
-        .into_galley(
-            ui,
-            Some(egui::TextWrapMode::Wrap),
-            ui.available_width(),
-            egui::TextStyle::Body,
-        );
+    let title = egui::WidgetText::from(
+        egui::RichText::new(title)
+            .size(super::TEXT_LG)
+            .color(super::FOREGROUND),
+    )
+    .into_galley(
+        ui,
+        Some(egui::TextWrapMode::Wrap),
+        ui.available_width(),
+        egui::TextStyle::Body,
+    );
     let (header, _) = ui.allocate_exact_size(
-        egui::vec2(title.size().x, title.size().y.max(super::ROW_HEIGHT)),
+        egui::vec2(
+            title.size().x + 2.0 * super::PADDING as f32,
+            title.size().y.max(super::ROW_HEIGHT),
+        ),
         egui::Sense::hover(),
     );
-    let heading = ui.put(header, egui::Label::new(title).halign(egui::Align::Min));
+    let heading = ui.put(
+        header.shrink2(egui::vec2(super::PADDING as f32, 0.0)),
+        egui::Label::new(title).halign(egui::Align::Min),
+    );
     let header_gap = (super::PADDING as f32 - ui.spacing().item_spacing.y).max(0.0);
     ui.add_space(header_gap);
     let font = egui::TextStyle::Button.resolve(ui.style());
@@ -256,7 +291,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn footer_rows_align_right_without_reversing_actions_or_growing_after_layout() {
+    fn footer_rows_align_right_with_primary_last_and_preserve_response_order() {
         for density in [1.0, 1.25, 2.0] {
             for width in [140.0, 220.0, 400.0] {
                 let context = crate::fonts::test_context();
@@ -278,16 +313,17 @@ mod tests {
                         );
                         assert!(!buttons[0].enabled());
                         assert!(buttons[1].enabled());
-                        for (index, button) in buttons.iter().enumerate() {
+                        let displayed: Vec<_> = buttons.iter().rev().collect();
+                        for (index, button) in displayed.iter().enumerate() {
                             assert!(button.rect.left() >= body.left() - 1.0 / density);
                             assert!(button.rect.right() <= body.right() + 1.0 / density);
-                            if let Some(next) = buttons.get(index + 1) {
+                            if let Some(next) = displayed.get(index + 1) {
                                 assert!(
                                     next.rect.top() > button.rect.top()
                                         || next.rect.left() > button.rect.left()
                                 );
                             }
-                            if buttons
+                            if displayed
                                 .get(index + 1)
                                 .is_none_or(|next| next.rect.top() > button.rect.top())
                             {
@@ -298,8 +334,9 @@ mod tests {
                         }
                         assert!(
                             (ui.min_rect().bottom()
-                                - buttons.last().expect("footer").rect.bottom())
-                            .abs()
+                                - buttons.first().expect("footer").rect.bottom()
+                                - 1.0)
+                                .abs()
                                 <= 1.0 / density
                         );
                     });

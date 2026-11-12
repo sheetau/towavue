@@ -65,11 +65,20 @@ impl RotationDialog {
                     angle_input(ui, &mut self.angle, &mut self.first_frame);
                     if let Some(value) = self.value() {
                         let size = self.result_size(value);
-                        ui.label(formatted::pixel_size(display_language, size.0, size.1));
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(ui.min_size().x, chrome::CONTROL_HEIGHT),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                ui.label(formatted::pixel_size(display_language, size.0, size.1));
+                            },
+                        );
                     }
                     let value = self.value();
                     if value.is_none() {
-                        ui.label(Text::ImageRotationLimits.in_language(display_language));
+                        chrome::modal_description(
+                            ui,
+                            Text::ImageRotationLimits.in_language(display_language),
+                        );
                     }
                     value
                 },

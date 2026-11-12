@@ -201,7 +201,7 @@ fn only_the_enter_target_has_selected_text_while_another_row_is_hovered() {
         let hovered_color = color(other);
         assert_eq!(selected_color, crate::chrome::FOREGROUND);
         assert_eq!(hovered_color, crate::chrome::MUTED);
-        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.rect.contains(point) && rect.fill == crate::chrome::HOVER)));
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.rect.contains(point) && rect.fill == crate::chrome::FLOATING_BACKGROUND)));
         let expected = if mode == 0 {
             Choice::Command(CommandId::OpenFile)
         } else {
@@ -512,9 +512,9 @@ fn file_and_folder_rows_remove_without_opening_and_keep_inline_labels_in_bounds(
                         output = frame(&mut palette, vec![]).0;
                     }
                     let group = if folders {
-                        "folders"
+                        "FOLDERS"
                     } else {
-                        "recently opened"
+                        "RECENTLY OPENED"
                     };
                     let name = picker_text(&output, "one.png").expect("name").0;
                     let label = picker_text(&output, group).expect("category heading").0;
@@ -634,8 +634,8 @@ fn search_result_dismissal_is_query_local_and_recent_results_stay_deduplicated()
     )
     .0;
     assert_eq!(palette.selected_path, Some(result.paths[1].clone()));
-    assert!(picker_text(&output, "recently opened").is_some());
-    assert!(picker_text(&output, "file results").is_some());
+    assert!(picker_text(&output, "RECENTLY OPENED").is_some());
+    assert!(picker_text(&output, "FILE RESULTS").is_some());
     let label = format!("Dismiss search result: {}", result.paths[1].display());
     let pos = button_position(&output, &label);
     let press = |pressed| egui::Event::PointerButton {
@@ -776,7 +776,7 @@ fn filename_priority_and_full_row_background_survive_hover_and_selection() {
                             );
                             assert!(
                                 output.shapes.iter().any(|shape| matches!(&shape.shape,
-                            egui::Shape::Rect(painted) if (painted.fill == crate::chrome::HOVER || painted.fill == crate::chrome::SURFACE)
+                            egui::Shape::Rect(painted) if (painted.fill == crate::chrome::FLOATING_BACKGROUND || painted.fill == crate::chrome::SURFACE)
                                 && painted.rect.min.distance(full.min) < 0.1
                                 && painted.rect.max.distance(full.max) < 0.1
                                 && painted.rect.contains(point)
@@ -984,7 +984,7 @@ fn command_history_returns_hidden_removal_width_and_keeps_removal_independent() 
 }
 
 #[test]
-fn palette_gear_configures_enabled_and_context_disabled_commands_without_execution() {
+fn palette_gear_configures_available_commands_and_omits_unavailable_commands() {
     for density in [1.0, 1.25, 2.0] {
         for command in [CommandId::OpenFile, CommandId::TogglePause] {
             let context = crate::fonts::test_context();
@@ -1015,6 +1015,21 @@ fn palette_gear_configures_enabled_and_context_disabled_commands_without_executi
             for _ in 0..4 {
                 output = frame(&mut palette, vec![]).0;
             }
+            if command == CommandId::TogglePause {
+                let tree = output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("tree");
+                assert!(
+                    !tree
+                        .nodes
+                        .iter()
+                        .any(|(_, node)| node.label() == Some(definition.title))
+                );
+                assert_ne!(palette.selected_command, Some(command));
+                continue;
+            }
             let body = button_rect(&output, definition.title);
             frame(&mut palette, vec![egui::Event::PointerMoved(body.center())]);
             output = frame(&mut palette, vec![]).0;
@@ -1036,7 +1051,7 @@ fn palette_gear_configures_enabled_and_context_disabled_commands_without_executi
                 .expect("gear");
             assert!(
                 !node.is_disabled(),
-                "context-disabled commands still support editing their binding"
+                "available commands support editing their binding"
             );
             assert!(!tree.nodes.iter().any(|(_, node)| {
                 node.label()

@@ -142,7 +142,7 @@ impl MetadataDialog {
                     ui.label(Text::MetadataField.in_language(display_language));
                     let response = chrome::combo_box(
                         ui,
-                        egui::ComboBox::from_id_salt("metadata-field").selected_text(
+                        crate::chrome::ComboBox::from_id_salt("metadata-field").selected_text(
                             MetadataField::ALL[self.selected].label_in(display_language),
                         ),
                         |ui| {

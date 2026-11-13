@@ -1,15 +1,27 @@
 use super::*;
 
 pub(super) fn category(ui: &mut egui::Ui, label: &str) {
-    let (rect, _) =
+    heading(ui, &label.to_uppercase());
+}
+
+pub(super) fn heading(ui: &mut egui::Ui, label: &str) {
+    let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 16.0), egui::Sense::hover());
-    ui.painter().text(
-        rect.left_center() + egui::vec2(crate::chrome::PADDING as f32, 0.0),
-        egui::Align2::LEFT_CENTER,
-        label.to_uppercase(),
-        egui::FontId::proportional(crate::chrome::TEXT_SM),
-        crate::chrome::FAINT,
+    let galley = egui::WidgetText::from(
+        egui::RichText::new(label)
+            .size(crate::chrome::TEXT_SM)
+            .color(crate::chrome::FAINT),
+    )
+    .into_galley(
+        ui,
+        Some(egui::TextWrapMode::Truncate),
+        (rect.width() - 2.0 * f32::from(crate::chrome::PADDING)).max(0.0),
+        egui::TextStyle::Small,
     );
+    let pos =
+        rect.left_center() + egui::vec2(f32::from(crate::chrome::PADDING), -galley.size().y * 0.5);
+    ui.painter().galley(pos, galley, crate::chrome::FAINT);
+    response.help_text(label);
 }
 
 /// Key names have caps; chord separators remain ordinary text. The width is

@@ -203,7 +203,8 @@ fn flat_buttons_and_combo_keep_corners_through_hover_press_and_open() {
                         rects[0] = ui.button("Apply").rect;
                         let combo = combo_box(
                             ui,
-                            egui::ComboBox::from_id_salt("filter").selected_text("Bicubic"),
+                            crate::chrome::ComboBox::from_id_salt("filter")
+                                .selected_text("Bicubic"),
                             |ui| {
                                 let _ = ui.selectable_label(true, "Bicubic");
                                 let _ = ui.selectable_label(false, "Lanczos");
@@ -277,7 +278,8 @@ fn modal_combo_text_shares_the_adjacent_label_center_without_growing_the_button(
                             "Resample",
                             80.0,
                             120.0,
-                            egui::ComboBox::from_id_salt("resample").selected_text("Lanczos"),
+                            crate::chrome::ComboBox::from_id_salt("resample")
+                                .selected_text("Lanczos"),
                             |_| {},
                         )
                         .response
@@ -362,5 +364,91 @@ fn maximized_top_gutter_activates_tabs_without_moving_the_title() {
             }
             assert_eq!(clicked, maximized, "density={density}");
         }
+    }
+}
+
+#[test]
+fn filled_combo_popup_rows_align_with_button_and_keep_two_point_gap() {
+    for density in [1.0, 1.25, 2.0] {
+        let context = crate::fonts::test_context();
+        context.global_style_mut(|s| {
+            style(s);
+            s.animation_time = 0.0;
+        });
+        context.set_pixels_per_point(density);
+        let mut button = Rect::NOTHING;
+        let mut row = Rect::NOTHING;
+        let mut frame = |events| {
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 300.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(
+                        Rect::from_min_max(egui::pos2(20.0, 20.0), egui::pos2(380.0, 280.0)),
+                    ));
+                    let ui = &mut child;
+                    button = combo_box(
+                        ui,
+                        ComboBox::from_id_salt("aligned")
+                            .width(120.0)
+                            .selected_text("First"),
+                        |ui| {
+                            let mut rows = Dropdown::new(ui);
+                            row = rows.value(ui, &mut 0, 0, "First").rect;
+                        },
+                    )
+                    .response
+                    .rect;
+                },
+            );
+            (output, button, row)
+        };
+        frame(vec![]);
+        let point = frame(vec![]).1.center();
+        for pressed in [true, false] {
+            frame(vec![
+                egui::Event::PointerMoved(point),
+                egui::Event::PointerButton {
+                    pos: point,
+                    pressed,
+                    button: egui::PointerButton::Primary,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]);
+        }
+        for _ in 0..3 {
+            frame(vec![]);
+        }
+        let (output, button, row) = frame(vec![]);
+        assert!(
+            (row.left() - button.left()).abs() <= 1.0 / density,
+            "{button:?} {row:?}"
+        );
+        assert!(
+            (row.width() - button.width()).abs() <= 1.0 / density,
+            "{button:?} {row:?}"
+        );
+        fn popup_frame(shape: &egui::Shape, row: Rect) -> Option<Rect> {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().find_map(|shape| popup_frame(shape, row)),
+                egui::Shape::Rect(rect)
+                    if rect.fill == FLOATING_BACKGROUND && rect.rect.contains(row.center()) =>
+                {
+                    Some(rect.rect)
+                }
+                _ => None,
+            }
+        }
+        let popup = output
+            .shapes
+            .iter()
+            .find_map(|shape| popup_frame(&shape.shape, row))
+            .expect("popup frame");
+        assert!((popup.left() - button.left() + 3.0).abs() <= 1.0 / density);
+        assert!((popup.top() - button.bottom() - 2.0).abs() <= 1.0 / density);
+        assert!((popup.width() - button.width() - 6.0).abs() <= 1.0 / density);
     }
 }

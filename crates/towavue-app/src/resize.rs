@@ -124,7 +124,7 @@ impl ResizeDialog {
                     labels[2],
                     label_width,
                     field_width,
-                    egui::ComboBox::from_id_salt("resize-resample")
+                    crate::chrome::ComboBox::from_id_salt("resize-resample")
                         .truncate()
                         .width(field_width)
                         .selected_text(filter_name(self.filter, display_language)),

@@ -11958,7 +11958,7 @@ where
                         {
                             self.filmstrip_browser.filter = None;
                         }
-                        self.filmstrip.focus_current();
+                        self.filmstrip.reveal_current();
                         self.request_redraw();
                     }
                     filmstrip_browser::Action::History(forward) => {

@@ -961,6 +961,8 @@ messages! {
     FolderResults => ("folders", "フォルダー"),
     RecentlyOpened => ("recently opened", "最近開いた項目"),
     FileResults => ("file results", "検索結果"),
+    CurrentFolderFiles => ("files in current folder", "現在のフォルダー内のファイル"),
+    CurrentFolderFolders => ("folders in current folder", "現在のフォルダー内のフォルダー"),
     RemoveRecentlyOpened => ("Remove from Recently Opened", "最近開いた履歴から削除"),
     DismissSearchResult => ("Dismiss search result", "検索結果から除外"),
     ThumbnailOpen => ("Open", "開く"),

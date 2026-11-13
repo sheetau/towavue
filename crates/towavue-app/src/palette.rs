@@ -551,47 +551,62 @@ impl CommandPalette {
         let mut chosen = enter.zip(selected).map(|(modifiers, index)| {
             RecentAction::Open(paths[index].clone(), kind, open_target(modifiers))
         });
-        if !folders || current {
-            if let Some(result) = search {
-                if let Some(error) = &result.error {
-                    let error = error.message(language);
-                    ui.add(
-                        egui::Label::new(egui::RichText::new(&error).weak())
-                            .truncate()
-                            .show_tooltip_when_elided(false),
-                    )
-                    .help_text(error);
-                } else if result.matches > result.paths.len() as u64 || result.skipped != 0 {
-                    let summary = formatted::file_search_summary(
-                        language,
-                        result.paths.len(),
-                        result.matches,
-                        result.skipped,
-                    );
-                    ui.add(
-                        egui::Label::new(egui::RichText::new(&summary).weak())
-                            .truncate()
-                            .show_tooltip_when_elided(false),
-                    )
-                    .help_text(formatted::file_search_help(language, &summary));
-                }
-            } else if sources.searching && (current || !query.is_empty()) {
-                ui.weak(
-                    if current {
-                        Text::SearchingCurrentFolder
+        let status = if !folders || current {
+            search
+                .and_then(|result| {
+                    if let Some(error) = &result.error {
+                        Some(error.message(language))
+                    } else if result.matches > result.paths.len() as u64 || result.skipped != 0 {
+                        Some(formatted::file_search_summary(
+                            language,
+                            result.paths.len(),
+                            result.matches,
+                            result.skipped,
+                        ))
                     } else {
-                        Text::SearchingSubfolders
+                        None
                     }
-                    .in_language(language),
-                );
-            }
+                })
+                .or_else(|| {
+                    (search.is_none() && sources.searching && (current || !query.is_empty())).then(
+                        || {
+                            if current {
+                                Text::SearchingCurrentFolder
+                            } else {
+                                Text::SearchingSubfolders
+                            }
+                            .in_language(language)
+                            .to_owned()
+                        },
+                    )
+                })
+        } else {
+            None
         }
+        .or_else(|| {
+            paths.is_empty().then(|| {
+                if folders {
+                    Text::NoMatchingFolders
+                } else {
+                    crate::browser_controls::query_error(&expression, false)
+                        .unwrap_or(Text::NoMatchingFiles)
+                }
+                .in_language(language)
+                .to_owned()
+            })
+        });
         let row_height = crate::chrome::ROW_HEIGHT;
         let gap = crate::chrome::ITEM_GAP;
         let category_height = 16.0;
-        let groups: Vec<_> = (0..paths.len())
+        let groups: Vec<_> = (0..paths.len().max(1))
             .filter_map(|index| {
-                let label = if folders && index == 0 {
+                let label = if current && index == 0 {
+                    if folders {
+                        Text::CurrentFolderFolders
+                    } else {
+                        Text::CurrentFolderFiles
+                    }
+                } else if folders && index == 0 {
                     Text::FolderResults
                 } else if !folders && index == 0 && recent_count > 0 {
                     Text::RecentlyOpened
@@ -609,7 +624,7 @@ impl CommandPalette {
                     * (category_height + gap)
         };
         let total_height = if paths.is_empty() {
-            row_height
+            category_height
         } else {
             row_top(paths.len() - 1) + row_height
         };
@@ -684,23 +699,16 @@ impl CommandPalette {
                             egui::vec2(ui.available_width(), category_height),
                         );
                         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-                        row::category(&mut child, label);
+                        if *index == 0
+                            && let Some(status) = &status
+                        {
+                            row::heading(&mut child, status);
+                        } else {
+                            row::category(&mut child, label);
+                        }
                     }
                 }
                 if paths.is_empty() {
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(if folders {
-                                Text::NoMatchingFolders.in_language(language)
-                            } else {
-                                crate::browser_controls::query_error(&expression, false)
-                                    .unwrap_or(Text::NoMatchingFiles)
-                                    .in_language(language)
-                            })
-                            .weak(),
-                        )
-                        .truncate(),
-                    );
                     return;
                 }
                 for (index, path) in paths.iter().enumerate() {

@@ -1076,3 +1076,81 @@ fn palette_gear_configures_available_commands_and_omits_unavailable_commands() {
         }
     }
 }
+
+#[test]
+fn current_search_status_replaces_one_category_with_shared_heading_style() {
+    use towavue_runtime_windows::{FileSearchRequest, FileSearchResult, FileSearchScope};
+    for folders in [false, true] {
+        for density in [1.0, 1.25, 2.0] {
+            let context = crate::fonts::test_context();
+            context.global_style_mut(crate::chrome::style);
+            let mut palette = CommandPalette::default();
+            palette.open_current(folders);
+            let mut result = FileSearchResult {
+                request: FileSearchRequest {
+                    root: "C:/media".into(),
+                    query: String::new(),
+                    scope: if folders {
+                        FileSearchScope::CurrentFolders
+                    } else {
+                        FileSearchScope::CurrentFiles
+                    },
+                },
+                paths: vec![PathBuf::from("C:/media/example.png")],
+                matches: 1,
+                skipped: 0,
+                error: None,
+            };
+            for state in 0..4 {
+                if state == 1 {
+                    result.matches = 2000;
+                }
+                if state == 2 {
+                    result.paths.clear();
+                    result.matches = 0;
+                }
+                let sources = OpenSources {
+                    search: (state != 3).then_some(&result),
+                    searching: state == 3,
+                    ..Default::default()
+                };
+                let mut output = egui::FullOutput::default();
+                for _ in 0..3 {
+                    output = open_frame_at(
+                        &context,
+                        &mut palette,
+                        sources,
+                        vec![],
+                        (egui::vec2(600.0, 400.0), 0.0, density),
+                    )
+                    .0;
+                }
+                let headings: Vec<_> = output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text)
+                            if text.galley.job.sections.first().is_some_and(|section| {
+                                section.format.color == crate::chrome::FAINT
+                            }) =>
+                        {
+                            Some(text)
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(headings.len(), 1, "state={state}, folders={folders}");
+                assert_eq!(
+                    headings[0].galley.job.sections[0].format.font_id.size,
+                    crate::chrome::TEXT_SM
+                );
+                let label = headings[0].galley.text();
+                if state == 0 {
+                    assert!(label.contains("IN CURRENT FOLDER"));
+                } else {
+                    assert_ne!(label, label.to_uppercase());
+                }
+            }
+        }
+    }
+}

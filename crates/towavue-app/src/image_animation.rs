@@ -5,7 +5,6 @@ use egui::{Color32, Rect, TextureHandle, TextureOptions, Vec2};
 use towavue_core::{CommandId, MediaKind};
 
 use crate::hover_help::HoverHelp;
-use crate::scroll_style::ScrollAreaStyle;
 use crate::{AppEvent, Application, ImagePresentation, UiAction, chrome, localization, media_time};
 
 #[derive(Clone)]
@@ -343,7 +342,7 @@ where
             },
             |ui| {
                 let background = ui.available_rect_before_wrap();
-                let side = background.height().max(1.0);
+                let side = (background.height() - 16.0 - 8.0 - 2.0 * 5.0).max(1.0);
                 let pitch = side + 5.0;
                 let count = image.decoded.frames.len();
                 ui.style_mut().always_scroll_the_only_direction = true;
@@ -352,6 +351,26 @@ where
                 scroll.floating_allocated_width = 0.0;
                 scroll.bar_outer_margin = 0.0;
                 scroll.fade.strength = 0.0;
+                scroll.bar_width = 8.0;
+                scroll.floating_width = 8.0;
+                scroll.bar_inner_margin = 0.0;
+                scroll.dormant_handle_opacity = 1.0;
+                scroll.active_handle_opacity = 1.0;
+                scroll.interact_handle_opacity = 1.0;
+                scroll.dormant_background_opacity = 1.0;
+                scroll.active_background_opacity = 1.0;
+                scroll.interact_background_opacity = 1.0;
+                scroll.foreground_color = true;
+                ui.visuals_mut().extreme_bg_color = chrome::FLOATING_BACKGROUND;
+                let widgets = &mut ui.visuals_mut().widgets;
+                for visual in [
+                    &mut widgets.inactive,
+                    &mut widgets.hovered,
+                    &mut widgets.active,
+                ] {
+                    visual.fg_stroke.color = chrome::KEY_ACTIVE;
+                    visual.corner_radius = egui::CornerRadius::same(chrome::RADIUS_XS);
+                }
                 let track = Rect::from_min_max(
                     background.min + egui::vec2(8.0, 0.0),
                     background.max - egui::vec2(8.0, 0.0),
@@ -362,6 +381,8 @@ where
                     .content_margin(0)
                     .id_salt("animation-frames")
                     .auto_shrink([false, false])
+                    .min_scrolled_height(0.0)
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
                     .scroll_bar_rect(track);
                 if let Some((old_pitch, old_width, offset)) = previous
                     && (old_pitch - pitch).abs() > 0.01
@@ -372,10 +393,10 @@ where
                         (center * pitch + 8.0 - background.width() * 0.5).max(0.0),
                     );
                 }
-                let output = area.show_viewport_styled(ui, |ui, viewport| {
+                let output = area.show_viewport(ui, |ui, viewport| {
                     ui.set_min_size(egui::vec2(
                         (count as f32 * pitch - 5.0).max(0.0) + 16.0,
-                        side,
+                        side + 5.0 + 16.0,
                     ));
                     let first = ((viewport.left() - 8.0).max(0.0) / pitch).floor() as usize;
                     let last = (((viewport.right() - 8.0).max(0.0) / pitch).ceil() as usize + 1)
@@ -409,6 +430,35 @@ where
                         egui::Image::from_texture((texture.id(), texture.size_vec2()))
                             .corner_radius(3.0)
                             .paint_at(ui, fitted);
+                        let label = ui.painter().layout_no_wrap(
+                            (index + 1).to_string(),
+                            egui::FontId::proportional(chrome::TEXT_SM),
+                            chrome::FOREGROUND,
+                        );
+                        let badge = Rect::from_min_size(
+                            rect.min + Vec2::splat(4.0),
+                            label.size() + egui::vec2(8.0, 4.0),
+                        );
+                        let painter = ui.painter_at(rect);
+                        painter.rect_filled(
+                            badge,
+                            chrome::RADIUS_XS,
+                            chrome::TRACK.gamma_multiply(0.6),
+                        );
+                        painter.galley(badge.min + egui::vec2(4.0, 2.0), label, chrome::FOREGROUND);
+                        let delay = format!("{:.3}", frame.delay.as_secs_f64());
+                        let delay = delay.trim_end_matches('0').trim_end_matches('.');
+                        let delay_rect = Rect::from_min_size(
+                            rect.left_bottom() + egui::vec2(0.0, 5.0),
+                            egui::vec2(side, 16.0),
+                        );
+                        ui.painter().text(
+                            delay_rect.right_center(),
+                            egui::Align2::RIGHT_CENTER,
+                            delay,
+                            egui::FontId::proportional(chrome::TEXT_SM),
+                            chrome::FOREGROUND,
+                        );
                         if index == image.frame_index {
                             ui.painter().rect_stroke(
                                 rect,
@@ -437,6 +487,15 @@ where
                         }
                     }
                 });
+                crate::wheel_input::record_scroll_area(ui, &output);
+                let bar = Rect::from_min_max(
+                    egui::pos2(track.left(), background.bottom() - 8.0),
+                    track.right_bottom(),
+                );
+                let fraction = image.frame_index as f32 / count.saturating_sub(1).max(1) as f32;
+                let x = egui::lerp((bar.left() + 0.5)..=(bar.right() - 0.5), fraction);
+                ui.painter()
+                    .vline(x, bar.y_range(), (1.0, chrome::FOREGROUND));
                 ui.data_mut(|data| {
                     data.insert_temp(
                         anchor_id,
@@ -586,8 +645,9 @@ mod tests {
                             &pixels[offset..offset + 4]
                         };
                         assert_eq!(pixel(50.0, 350.0), &[0, 80, 180, 255]);
-                        assert_eq!(pixel(145.0, 350.0), &[200, 40, 60, 255]);
-                        let border = pixel(8.0 + selected as f32 * 93.0, 350.0);
+                        assert_eq!(pixel(90.0, 350.0), &[200, 40, 60, 255]);
+                        let border_x = ((8.0 + selected as f32 * 59.0) * density).ceil() / density;
+                        let border = pixel(border_x, 350.0);
                         assert!(
                             border[..3].iter().all(|channel| *channel >= 220),
                             "current frame border at density {density}: {border:?}"
@@ -884,7 +944,7 @@ mod tests {
             .as_ref()
             .expect("transport")
             .thumbnails;
-        assert!(thumbnails.len() < 12, "only viewport frames have textures");
+        assert!(thumbnails.len() <= 12, "only viewport frames have textures");
         assert!(
             !thumbnails.contains_key(&0),
             "ordinary vertical wheel scrolls horizontal frames"

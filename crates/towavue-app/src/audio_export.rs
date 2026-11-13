@@ -199,7 +199,7 @@ impl AudioExportDialog {
                                     labels[0],
                                     label_width,
                                     field_width,
-                                    egui::ComboBox::from_id_salt("normalization")
+                                    crate::chrome::ComboBox::from_id_salt("normalization")
                                         .truncate()
                                         .width(field_width)
                                         .selected_text(selected.in_language(display_language)),
@@ -268,7 +268,7 @@ impl AudioExportDialog {
                                     labels[1],
                                     label_width,
                                     field_width,
-                                    egui::ComboBox::from_id_salt("output-channels")
+                                    crate::chrome::ComboBox::from_id_salt("output-channels")
                                         .truncate()
                                         .width(field_width)
                                         .selected_text(selected.in_language(display_language)),

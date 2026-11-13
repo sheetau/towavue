@@ -1,3 +1,5 @@
+mod combo;
+pub use combo::ComboBox;
 mod submenu;
 use egui::{Color32, Pos2, Rect, Stroke, Ui, emath::GuiRounding};
 pub use submenu::{chevron, menu_button, remember_menu_bounds, submenu, submenu_button};
@@ -469,7 +471,7 @@ pub fn menu(ui: &mut Ui) {
 
 pub fn combo_box<R>(
     ui: &mut Ui,
-    combo: egui::ComboBox,
+    combo: ComboBox,
     contents: impl FnOnce(&mut Ui) -> R,
 ) -> egui::InnerResponse<Option<R>> {
     combo_box_impl(ui, combo, None, None, contents)
@@ -480,7 +482,7 @@ pub fn labeled_combo_box<R>(
     label: &str,
     label_width: f32,
     field_width: f32,
-    combo: egui::ComboBox,
+    combo: ComboBox,
     contents: impl FnOnce(&mut Ui) -> R,
 ) -> egui::InnerResponse<Option<R>> {
     combo_box_impl(
@@ -494,7 +496,7 @@ pub fn labeled_combo_box<R>(
 
 fn combo_box_impl<R>(
     ui: &mut Ui,
-    combo: egui::ComboBox,
+    combo: ComboBox,
     label: Option<(&str, f32)>,
     field_width: Option<f32>,
     contents: impl FnOnce(&mut Ui) -> R,
@@ -523,30 +525,18 @@ fn combo_box_impl<R>(
             }
             ui.spacing_mut().icon_width = ICON_SIZE;
             ui.spacing_mut().icon_spacing = PADDING as f32;
-            combo
-                .icon(move |ui, rect, visuals, _| {
-                    // ComboBox centers its label and icon in the same content rect.
-                    if let Some((text, bounds, painter, font, color)) = &label {
-                        painter.text(
-                            egui::pos2(bounds.right(), rect.center().y),
-                            egui::Align2::RIGHT_CENTER,
-                            text,
-                            font.clone(),
-                            *color,
-                        );
-                    }
-                    ui.painter().text(
-                        rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        "\u{eab4}",
-                        crate::fonts::icon_font(),
-                        visuals.fg_stroke.color,
-                    );
-                })
-                .popup_style(menu_style.into())
-                .show_ui(ui, contents)
+            combo.show(ui, contents)
         })
         .inner;
+    if let Some((text, bounds, painter, font, color)) = label {
+        painter.text(
+            egui::pos2(bounds.right(), result.response.rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            text,
+            font,
+            color,
+        );
+    }
     filled_button_border(ui, &result.response, INPUT_RADIUS);
     result.response = result
         .response

@@ -177,6 +177,7 @@ pub struct Filmstrip {
     )>,
     preserve_refresh_view: bool,
     focus_requested: bool,
+    animate_focus: bool,
     focused_card: Option<egui::Id>,
     recent_focus: Option<PathBuf>,
     selection: Option<PathBuf>,
@@ -239,6 +240,7 @@ impl Filmstrip {
             held_snapshot: None,
             preserve_refresh_view: false,
             focus_requested: false,
+            animate_focus: false,
             focused_card: None,
             recent_focus: None,
             selection: None,
@@ -505,16 +507,29 @@ impl Filmstrip {
     }
 
     pub fn focus_current(&mut self) {
+        self.request_current_focus(false);
+    }
+
+    pub fn reveal_current(&mut self) {
+        self.request_current_focus(true);
+    }
+
+    fn request_current_focus(&mut self, animate: bool) {
         self.selection = None;
         self.selection_only = false;
-        self.indicator = Default::default();
+        if !animate {
+            self.indicator = Default::default();
+        }
         self.page_target = None;
         self.restore_scroll = false;
         self.scroll_target = None;
-        self.scroll_time = None;
+        if !animate {
+            self.scroll_time = None;
+        }
         self.tab_navigation = None;
         self.preserve_refresh_view = false;
         self.focus_requested = true;
+        self.animate_focus = animate;
     }
 
     pub fn prepare_neighbors(&mut self, snapshot: Option<&FolderSnapshot>, current: Option<&Path>) {
@@ -983,6 +998,11 @@ impl Filmstrip {
         } else {
             None
         };
+        let tab_target = tab_target.or_else(|| {
+            (can_focus && self.focus_requested && self.animate_focus)
+                .then_some(selected)
+                .flatten()
+        });
         if let Some(target) = tab_target {
             // Resolve folder traversal before virtualization, including offscreen neighbors. Reuse this
             // target across discarded passes so one key cannot advance twice.
@@ -1019,7 +1039,7 @@ impl Filmstrip {
         }
         // A new Shell order can relocate focus without owning the viewport.
         // Only explicit navigation/reopening may recenter it.
-        let snap = recenter || self.focus_requested;
+        let snap = recenter || (self.focus_requested && !self.animate_focus);
         let restore = self.restore_scroll && snapshot.is_some();
         let was_scrolling = self.scroll_target.is_some() || self.page_target.is_some();
         // Keyboard navigation owns selection until it reaches its destination.
@@ -4753,6 +4773,21 @@ mod tests {
             other,
             "ordinary redraw does not steal focus"
         );
+        strip.scroll_offset = 0.0;
+        strip.scroll_target = None;
+        strip.reveal_current();
+        frame(
+            &mut strip,
+            Some(&snapshot),
+            Some(&snapshot.items[49_999].path),
+            vec![],
+        );
+        let destination = strip.layout.center_offset(49_999);
+        assert!(
+            strip.scroll_offset > 0.0 && strip.scroll_offset < destination,
+            "explicit reveal interpolates instead of jumping"
+        );
+        assert_eq!(strip.scroll_target, Some(49_999));
         strip.focus_current();
         strip.clear();
         assert!(

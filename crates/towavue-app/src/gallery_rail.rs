@@ -95,7 +95,14 @@ pub(super) fn advance_offset(context: &egui::Context, scroll_id: egui::Id) -> Op
     })
 }
 
-/// Date-free rail: the thumb is the viewport, markers are document identities.
+#[derive(Clone, Copy)]
+struct FocusMarker {
+    position: f32,
+    time: f64,
+    layout: egui::Id,
+}
+
+/// Date-free rail: white is scroll position; long gray is focus and short gray is media.
 pub(super) fn show_positions<R>(
     ui: &mut egui::Ui,
     output: &mut egui::scroll_area::ScrollAreaOutput<R>,
@@ -103,6 +110,7 @@ pub(super) fn show_positions<R>(
     count: usize,
     current: Option<usize>,
     selected: Option<usize>,
+    snap: bool,
 ) {
     if count == 0 || rect.height() < 12.0 {
         return;
@@ -189,29 +197,54 @@ pub(super) fn show_positions<R>(
         ui.ctx().request_repaint();
     }
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
-    painter.rect_filled(thumb, 0.0, chrome::SURFACE);
-    for (index, color) in [
-        (
-            current.filter(|index| Some(*index) != selected),
-            chrome::MUTED,
-        ),
-        (selected, chrome::FOREGROUND),
-    ] {
-        if let Some(index) = index {
-            let fraction = index as f32 / count.saturating_sub(1).max(1) as f32;
-            let y = (((rect.top() + fraction * rect.height() - pixel * 0.5) / pixel).round()
-                * pixel)
-                .clamp(
-                    (rect.top() / pixel).ceil() * pixel,
-                    (rect.bottom() / pixel).floor() * pixel - pixel,
-                );
-            painter.rect_filled(
-                egui::Rect::from_min_max(egui::pos2(left, y), egui::pos2(right, y + pixel)),
-                0.0,
-                color,
+    painter.rect_filled(
+        thumb,
+        0.0,
+        egui::Color32::from_rgba_unmultiplied(0x1f, 0x1f, 0x1f, 148),
+    );
+    let line = |left: f32, fraction: f32, color| {
+        let y = (((rect.top() + fraction * rect.height() - pixel * 0.5) / pixel).round() * pixel)
+            .clamp(
+                (rect.top() / pixel).ceil() * pixel,
+                (rect.bottom() / pixel).floor() * pixel - pixel,
             );
-        }
+        painter.rect_filled(
+            egui::Rect::from_min_max(egui::pos2(left, y), egui::pos2(right, y + pixel)),
+            0.0,
+            color,
+        );
+    };
+    let at = |index: usize| index as f32 / count.saturating_sub(1).max(1) as f32;
+    if let Some(index) = current {
+        line(right - 10.0 * pixel, at(index), chrome::MUTED);
     }
+    let marker_id = output.id.with("focus-marker");
+    if let Some(index) = selected {
+        let target = at(index);
+        let now = ui.input(|input| input.time);
+        let mut marker = ui
+            .data(|data| data.get_temp::<FocusMarker>(marker_id))
+            .filter(|marker| marker.layout == layout && !snap)
+            .unwrap_or(FocusMarker {
+                position: target,
+                time: now,
+                layout,
+            });
+        let dt = (now - marker.time).clamp(0.0, 1.0 / 30.0) as f32;
+        marker.time = now;
+        marker.position += (target - marker.position) * (1.0 - (-dt / 0.055).exp());
+        if (target - marker.position).abs() * rect.height() < pixel * 0.5 {
+            marker.position = target;
+        } else {
+            ui.ctx().request_repaint();
+        }
+        ui.data_mut(|data| data.insert_temp(marker_id, marker));
+        line(left, marker.position, chrome::MUTED);
+    } else {
+        ui.data_mut(|data| data.remove::<FocusMarker>(marker_id));
+    }
+    // Scroll position always paints last, including coincident document markers.
+    line(left, fraction, chrome::FOREGROUND);
     crate::wheel_input::record_scroll_area(ui, output);
 }
 

@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) const DIAMETER: f32 = 120.0;
-const GAP: f32 = 10.0;
+pub(super) const GAP: f32 = 10.0;
 
 /// Thumbnail sizes are independent of the fixed column geometry.
 /// Loading or evicting a texture never changes scroll positions.

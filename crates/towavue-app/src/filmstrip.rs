@@ -1396,7 +1396,7 @@ impl Filmstrip {
                     // Reserve a stable caption band independent of aspect or filename.
                     // Compact windows elide sooner so the position above stays visible.
                     let caption_rows = if grid {
-                        2
+                        3
                     } else {
                         ((ui.clip_rect().height()
                             - layout::DIAMETER
@@ -1643,24 +1643,14 @@ impl Filmstrip {
                                 caption,
                                 FontId::proportional(crate::hover_help::TEXT_SIZE),
                                 crate::chrome::FOREGROUND,
-                                if grid {
-                                    self.layout
-                                        .grid
-                                        .expect("grid geometry")
-                                        .cell
-                                        .min(GALLERY_DIAMETER)
-                                } else {
-                                    indicator::TEXT_WIDTH
-                                },
+                                indicator::TEXT_WIDTH,
                             );
                             job.wrap.max_rows = if below { caption_rows } else { 1 };
                             let text = ui.painter().layout_job(job);
                             let y = if below {
-                                bounds.bottom() + if grid { 4.0 } else { indicator::TEXT_GAP }
+                                bounds.bottom() + indicator::TEXT_GAP
                             } else {
-                                bounds.top()
-                                    - if grid { 4.0 } else { indicator::TEXT_GAP }
-                                    - text.size().y
+                                bounds.top() - indicator::TEXT_GAP - text.size().y
                             };
                             ui.painter().galley(
                                 egui::pos2(bounds.left(), y),
@@ -1682,6 +1672,7 @@ impl Filmstrip {
                         snapshot.items.len(),
                         selected,
                         selection,
+                        snap || restore || reflow.is_some() || tab_target.is_some(),
                     );
                 }
                 self.scroll_offset = if grid {

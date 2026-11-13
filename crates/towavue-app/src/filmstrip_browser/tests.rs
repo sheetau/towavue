@@ -2073,7 +2073,7 @@ fn browser_search_retains_media_focus_and_filtered_tab_traversal_uses_paths() {
         .bounds()
         .expect("bounds");
     assert!(
-        ((card.y0 + card.y1) * 0.5 - 116.0).abs() < 1.0,
+        ((card.y0 + card.y1) * 0.5 - 108.0).abs() < 1.0,
         "grid keeps Gallery top padding and cell center: {card:?}"
     );
     let dim = output

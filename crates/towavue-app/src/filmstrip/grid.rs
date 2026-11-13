@@ -1,7 +1,10 @@
 use super::*;
 
-/// Same fixed cells and centered gutters as Gallery. Captions and late preview
-/// sizes never participate in layout or change the scroll extent.
+/// Filmstrip's original thumbnail diameter and horizontal pitch, arranged in
+/// rows inside Gallery's side gutters. Reserve room for three caption lines.
+pub(super) const ROW_GAP: f32 = 128.0;
+
+/// Captions and late preview sizes never change the scroll extent.
 #[derive(Clone, Copy, PartialEq)]
 pub(super) struct Grid {
     pub columns: usize,
@@ -14,17 +17,22 @@ impl Grid {
     pub fn new(screen: Rect, inset: Rect) -> Self {
         let side = gallery_side_inset(screen.width());
         let width = (screen.width() - 2.0 * side).max(1.0);
-        let (columns, cell) = gallery_cells(width, inset.height());
+        let cell = layout::DIAMETER.min(width);
+        let rows = (inset.height() / (cell + ROW_GAP)).ceil() as usize + 2;
+        let columns = (((width + layout::GAP) / (cell + layout::GAP)).floor() as usize)
+            .max(1)
+            .min((VISIBLE_PREVIEW_LIMIT / rows.max(1)).max(1));
+        let used = columns as f32 * cell + columns.saturating_sub(1) as f32 * layout::GAP;
         Self {
             columns,
             cell,
-            left: screen.left() + side - inset.left(),
+            left: screen.left() + side + (width - used) * 0.5 - inset.left(),
             viewport: inset.height(),
         }
     }
 
     pub fn pitch(self) -> f32 {
-        self.cell + GALLERY_GAP
+        self.cell + ROW_GAP
     }
 
     pub fn height(self, count: usize) -> f32 {
@@ -41,7 +49,7 @@ impl Grid {
         let cell = Rect::from_min_size(
             origin
                 + egui::vec2(
-                    self.left + (index % self.columns) as f32 * self.pitch(),
+                    self.left + (index % self.columns) as f32 * (self.cell + layout::GAP),
                     GALLERY_GAP + (index / self.columns) as f32 * self.pitch(),
                 ),
             Vec2::splat(self.cell),
@@ -51,7 +59,7 @@ impl Grid {
 
     pub fn visible(self, viewport: Rect, count: usize) -> Range<usize> {
         // Include the caption band even when its thumbnail is just above view.
-        let first = ((viewport.top() - GALLERY_GAP - 40.0) / self.pitch())
+        let first = ((viewport.top() - GALLERY_GAP - 90.0) / self.pitch())
             .floor()
             .max(0.0) as usize;
         let last = ((viewport.bottom() - GALLERY_GAP) / self.pitch())

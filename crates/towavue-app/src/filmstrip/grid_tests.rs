@@ -45,9 +45,9 @@ fn key(key: egui::Key) -> egui::Event {
 }
 
 #[test]
-fn grid_matches_gallery_and_keeps_keyboard_target_through_scroll_and_tab_restore() {
+fn grid_keeps_filmstrip_spacing_and_keyboard_target_through_scroll_and_tab_restore() {
     let Some(root) = crate::tests::isolated_test_root(
-        "filmstrip::grid_tests::grid_matches_gallery_and_keeps_keyboard_target_through_scroll_and_tab_restore",
+        "filmstrip::grid_tests::grid_keeps_filmstrip_spacing_and_keyboard_target_through_scroll_and_tab_restore",
     ) else {
         return;
     };
@@ -87,7 +87,7 @@ fn grid_matches_gallery_and_keeps_keyboard_target_through_scroll_and_tab_restore
             frame(&mut strip, &context, &snapshot, step as f64 / 60.0, vec![]);
         }
         let geometry = strip.layout.grid.expect("production grid");
-        assert_eq!(geometry.columns, 4);
+        assert_eq!(geometry.columns, 5);
         let card = |strip: &Filmstrip, index| {
             let id = strip
                 .card_paths
@@ -98,9 +98,9 @@ fn grid_matches_gallery_and_keeps_keyboard_target_through_scroll_and_tab_restore
             context.read_response(id).expect("response").rect
         };
         let first = card(&strip, 0);
-        assert!((first.size().length() - GALLERY_DIAMETER).abs() < 0.001);
-        assert!((first.center().x - 204.0).abs() < 0.001);
-        assert!((first.center().y - 116.0).abs() < 0.001);
+        assert!((first.size().length() - layout::DIAMETER).abs() < 0.001);
+        assert!((first.center().x - 220.0).abs() < 0.001);
+        assert!((first.center().y - 108.0).abs() < 0.001);
         frame(
             &mut strip,
             &context,
@@ -117,7 +117,7 @@ fn grid_matches_gallery_and_keeps_keyboard_target_through_scroll_and_tab_restore
             0.6,
             vec![key(egui::Key::ArrowDown)],
         );
-        assert_eq!(strip.selection.as_ref(), Some(&snapshot.items[4].path));
+        assert_eq!(strip.selection.as_ref(), Some(&snapshot.items[5].path));
         let actions = frame(
             &mut strip,
             &context,
@@ -128,9 +128,9 @@ fn grid_matches_gallery_and_keeps_keyboard_target_through_scroll_and_tab_restore
                 .chain([key(egui::Key::Enter)])
                 .collect(),
         );
-        assert!(actions.iter().any(|action| matches!(action, UiAction::OpenFilmstripMedia(path, false) if path == &snapshot.items[52].path)), "rapid navigation opens its offscreen target");
+        assert!(actions.iter().any(|action| matches!(action, UiAction::OpenFilmstripMedia(path, false) if path == &snapshot.items[65].path)), "rapid navigation opens its offscreen target");
         assert!(strip.card_paths.len() <= VISIBLE_PREVIEW_LIMIT);
-        let destination = strip.layout.center_offset(52);
+        let destination = strip.layout.center_offset(65);
         assert!(strip.scroll_offset < destination);
         let view = strip.take_view();
         assert_eq!(
@@ -140,7 +140,7 @@ fn grid_matches_gallery_and_keeps_keyboard_target_through_scroll_and_tab_restore
         strip.restore_view(view);
         frame(&mut strip, &context, &snapshot, 1.0, vec![]);
         assert!((strip.scroll_offset - destination).abs() < 0.01);
-        assert_eq!(strip.selection.as_ref(), Some(&snapshot.items[52].path));
+        assert_eq!(strip.selection.as_ref(), Some(&snapshot.items[65].path));
         let before = strip.scroll_offset;
         let mut refreshed = snapshot.clone();
         refreshed.generation += 1;
@@ -166,15 +166,17 @@ fn grid_matches_gallery_and_keeps_keyboard_target_through_scroll_and_tab_restore
 }
 
 #[test]
-fn grid_cells_are_stable_bounded_and_share_gallery_geometry() {
+fn grid_cells_keep_fixed_pitch_and_wide_caption_gaps() {
     for width in [220.0, 480.0, 960.0, 3840.0, 100_000.0] {
         let screen = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 720.0));
         let grid = grid::Grid::new(screen, screen.shrink(8.0));
         let available = (width - 2.0 * gallery_side_inset(width)).max(1.0);
-        assert_eq!(
-            (grid.columns, grid.cell),
-            grid::gallery_cells(available, 704.0)
-        );
+        assert_eq!(grid.cell, layout::DIAMETER.min(available));
+        if grid.columns > 1 {
+            let a = grid.rect(0, egui::Pos2::ZERO, Vec2::splat(1.0));
+            let b = grid.rect(1, egui::Pos2::ZERO, Vec2::splat(1.0));
+            assert!((b.center().x - a.center().x - grid.cell - layout::GAP).abs() < 0.001);
+        }
         for offset in [0.0, 500.0, 50_000.0] {
             let viewport = Rect::from_min_size(egui::pos2(0.0, offset), egui::vec2(width, 704.0));
             assert!(grid.visible(viewport, 50_000).len() <= VISIBLE_PREVIEW_LIMIT);
@@ -183,6 +185,6 @@ fn grid_cells_are_stable_bounded_and_share_gallery_geometry() {
         let b = grid.rect(0, egui::Pos2::ZERO, egui::vec2(20.0, 1.0));
         assert!(a.center().distance(b.center()) < 0.001);
         let next = grid.rect(grid.columns, egui::Pos2::ZERO, egui::vec2(1.0, 20.0));
-        assert!(next.top() - a.bottom() >= GALLERY_GAP - 0.001);
+        assert!(next.top() - a.bottom() >= grid::ROW_GAP - 0.001);
     }
 }

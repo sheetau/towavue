@@ -104,6 +104,7 @@ impl PlaybackRange {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EditOperation {
+    SetAudioTrackOutput(crate::AudioTrackTarget, bool),
     Timeline(crate::TimelineEdit),
     Resize(ImageResize),
     ResizeVideo(crate::VideoResize),
@@ -125,7 +126,9 @@ impl EditOperation {
         match self {
             Self::Timeline(_) => matches!(kind, MediaKind::Video | MediaKind::Audio),
             Self::Resize(_) | Self::RotateImage(_) => kind == MediaKind::Image,
-            Self::RotateVideo(_) | Self::ResizeVideo(_) => kind == MediaKind::Video,
+            Self::RotateVideo(_) | Self::ResizeVideo(_) | Self::SetAudioTrackOutput(..) => {
+                kind == MediaKind::Video
+            }
             Self::Crop(_)
             | Self::RotateClockwise
             | Self::RotateCounterclockwise
@@ -141,6 +144,7 @@ impl EditOperation {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct EditState {
+    pub audio_output: crate::AudioTrackOutput,
     pub quarter_turns: u8,
     pub flip_horizontal: bool,
     pub flip_vertical: bool,
@@ -153,6 +157,7 @@ pub struct EditState {
 impl Default for EditState {
     fn default() -> Self {
         Self {
+            audio_output: Default::default(),
             quarter_turns: 0,
             flip_horizontal: false,
             flip_vertical: false,
@@ -176,6 +181,9 @@ impl EditState {
         let mut state = Self::default();
         for operation in operations {
             match *operation {
+                EditOperation::SetAudioTrackOutput(target, enabled) => {
+                    state.audio_output.set_enabled(target, enabled)
+                }
                 EditOperation::Crop(_)
                 | EditOperation::Resize(_)
                 | EditOperation::ResizeVideo(_)
@@ -388,6 +396,7 @@ impl EditHistory {
 
 #[derive(PartialEq)]
 enum EffectiveEdit {
+    AudioOutput(crate::AudioTrackOutput),
     Orientation(u8, bool),
     Operation(EditOperation),
     Playback(PlaybackRange, f32, f32),
@@ -414,7 +423,8 @@ fn compare_edits(
         while let Some((operation, rest)) = operations.split_first() {
             match operation {
                 EditOperation::Timeline(_) if skip_timeline => {}
-                EditOperation::SetVolume(_)
+                EditOperation::SetAudioTrackOutput(..)
+                | EditOperation::SetVolume(_)
                 | EditOperation::SetRate(_)
                 | EditOperation::SetTrimStart(_)
                 | EditOperation::SetTrimEnd(_) => {}
@@ -448,6 +458,9 @@ fn compare_edits(
         },
         state.volume,
         state.rate,
+    )))
+    .chain(std::iter::once(EffectiveEdit::AudioOutput(
+        state.audio_output,
     )))
 }
 
@@ -1032,5 +1045,60 @@ mod tests {
         assert!(!history.is_dirty());
         history.undo();
         assert!(history.is_dirty());
+    }
+}
+
+#[cfg(test)]
+mod audio_output_tests {
+    use super::*;
+    use crate::{AudioTrackId, AudioTrackTarget};
+
+    #[test]
+    fn inclusion_is_undoable_canonical_and_independent_of_gain_and_time() {
+        let first = AudioTrackId::from_index(1);
+        let second = AudioTrackId::from_index(4);
+        let mut history = EditHistory::default();
+        let initial = history.state();
+        assert!(history.push(
+            EditOperation::SetAudioTrackOutput(AudioTrackTarget::Track(first), false),
+            MediaKind::Video
+        ));
+        assert!(history.is_dirty());
+        assert!(!history.state().audio_output.is_enabled(first));
+        assert!(history.state().audio_output.is_enabled(second));
+        assert_eq!(history.state().volume, initial.volume);
+        assert_eq!(history.state().playback_range(), initial.playback_range());
+        history.undo();
+        assert!(!history.is_dirty());
+        history.redo();
+        assert!(!history.state().audio_output.is_enabled(first));
+        history.push(
+            EditOperation::SetAudioTrackOutput(AudioTrackTarget::Track(first), true),
+            MediaKind::Video,
+        );
+        assert!(
+            !history.is_dirty(),
+            "inverse output edits are clean by content"
+        );
+        history.push(
+            EditOperation::SetAudioTrackOutput(AudioTrackTarget::All, false),
+            MediaKind::Video,
+        );
+        assert!(!history.state().audio_output.is_enabled(second));
+        history.push(
+            EditOperation::SetAudioTrackOutput(AudioTrackTarget::Track(first), true),
+            MediaKind::Video,
+        );
+        assert!(history.state().audio_output.is_enabled(first));
+        assert!(!history.state().audio_output.is_enabled(second));
+        history.push(
+            EditOperation::SetAudioTrackOutput(AudioTrackTarget::All, true),
+            MediaKind::Video,
+        );
+        assert!(!history.is_dirty());
+        assert!(!history.push(
+            EditOperation::SetAudioTrackOutput(AudioTrackTarget::All, false),
+            MediaKind::Audio
+        ));
     }
 }

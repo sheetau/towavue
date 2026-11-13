@@ -86,8 +86,8 @@ pub(super) fn phrases(command: CommandId) -> &'static str {
         KeepTimeSelection => {
             "crop selection|trim selection|keep only selected time|切り抜き|トリミング|選択範囲だけ残す"
         }
-        SilenceTimeSelection => {
-            "silence selection|mute selection|remove audio|zero gain|無音化|区間ミュート|音を消す"
+        MuteAudioTrack => {
+            "mute track|exclude track|remove audio|output track|トラックミュート|音声除外|音を消す"
         }
         PlayTimeSelection => "preview selection|play range|区間再生|選択範囲を再生",
         RotateClockwise => "turn right|rotate right|右回転|時計回り",

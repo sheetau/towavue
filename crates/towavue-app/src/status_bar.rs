@@ -372,6 +372,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                             actions.push(UiAction::Command(CommandId::ToggleMute));
                         }
                         volume_targets.push(volume);
+                        self.draw_audio_track_controls(ui, actions);
                     } else if self.animation_timeline_visible() {
                         self.draw_animation_transport(ui, actions);
                     } else if self.media_kind == Some(MediaKind::Image) {

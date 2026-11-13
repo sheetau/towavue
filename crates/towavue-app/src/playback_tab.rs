@@ -280,16 +280,18 @@ impl RetainedPlaybackTab {
         );
         let pause =
             self.state == PlaybackState::Ended || end == Some(target) || !range.contains(target);
-        let result = match plan {
-            Some(plan) => session.seek_with_timeline_selection(
-                target,
-                rate,
-                plan,
-                self.playback_selection,
-                pause,
-            ),
-            None => session.seek_with_edits(target, rate, range, pause),
-        };
+        let result = session
+            .configure_audio_output(edit.audio_output)
+            .and_then(|()| match plan {
+                Some(plan) => session.seek_with_timeline_selection(
+                    target,
+                    rate,
+                    plan,
+                    self.playback_selection,
+                    pause,
+                ),
+                None => session.seek_with_edits(target, rate, range, pause),
+            });
         match result {
             Ok(_) => {
                 if pause {

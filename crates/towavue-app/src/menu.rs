@@ -144,7 +144,7 @@ const MENUS: &[(Text, &[&[CommandId]])] = &[
             &[
                 DeleteTimeSelection,
                 KeepTimeSelection,
-                SilenceTimeSelection,
+                MuteAudioTrack,
                 PlayTimeSelection,
             ],
             &[EditSpeed],

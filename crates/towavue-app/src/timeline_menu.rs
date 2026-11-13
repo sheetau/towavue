@@ -18,7 +18,7 @@ pub(crate) enum Action {
     DeselectAll,
     Delete,
     Crop,
-    Silence,
+    MuteTrack,
     Speed,
     Play,
 }
@@ -32,7 +32,7 @@ impl Action {
             Self::Crop => CommandId::KeepTimeSelection,
             Self::Play => CommandId::PlayTimeSelection,
             Self::Speed => CommandId::EditSpeed,
-            Self::Silence => CommandId::SilenceTimeSelection,
+            Self::MuteTrack => CommandId::MuteAudioTrack,
         })
     }
 }
@@ -152,8 +152,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             && self
                 .playback_duration()
                 .is_some_and(|duration| !duration.is_zero())
-            && (matches!(action, Action::SelectAll | Action::Silence | Action::Speed)
-                || self.time_selection.is_some())
+            && (matches!(
+                action,
+                Action::SelectAll | Action::MuteTrack | Action::Speed
+            ) || self.time_selection.is_some())
             && action.command().is_none_or(|command| {
                 command_definitions().iter().any(|definition| {
                     definition.id == command && definition.is_enabled(self.command_context())
@@ -208,7 +210,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 ),
                 (Action::Delete, Text::TimelineDelete.in_language(language)),
                 (Action::Crop, Text::TimelineCrop.in_language(language)),
-                (Action::Silence, Text::TimelineSilence.in_language(language)),
+                (
+                    Action::MuteTrack,
+                    Text::MuteAudioTrack.in_language(language),
+                ),
                 (Action::Speed, Text::CommandEditSpeed.in_language(language)),
                 (Action::Play, Text::TimelinePlay.in_language(language)),
             ] {

@@ -268,6 +268,122 @@ fn hidden_session_switches_tracks_without_changing_edits_and_moves_choice_with_t
             destination.select_audio_track(AudioTrackSelection::All);
             assert_eq!(destination.state, PlaybackState::Paused);
             assert_eq!(destination.audio_selection(), AudioTrackSelection::All);
+            destination.timeline_open = true;
+            let volume = destination.playback_volume();
+            destination.select_audio_track(AudioTrackSelection::Track(tracks[0]));
+            destination.dispatch(CommandId::MuteAudioTrack);
+            assert!(destination.waveform_track_muted());
+            let context = destination.ui_context.as_ref().expect("UI context").clone();
+            context.enable_accesskit();
+            destination
+                .renderer
+                .as_mut()
+                .expect("renderer")
+                .resize_surface(300, 220)
+                .expect("control surface");
+            for _ in 0..3 {
+                let output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(300.0, 220.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        ui.add_space(180.0);
+                        destination.draw_audio_track_controls(ui, &mut Vec::new());
+                    },
+                );
+                let tree = output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("controls");
+                for label in ["A1", "Mute track"] {
+                    let node = tree
+                        .nodes
+                        .iter()
+                        .find(|(_, node)| node.label() == Some(label))
+                        .expect("track control");
+                    let bounds = node.1.bounds().expect("control bounds");
+                    assert_eq!(bounds.y1 - bounds.y0, 24.0, "full-height track input");
+                }
+                let renderer = destination.renderer.as_mut().expect("renderer");
+                renderer.clear([0.0, 0.0, 0.0, 1.0]).expect("clear");
+                renderer
+                    .render_ui(&context, output)
+                    .expect("track controls GPU");
+            }
+            if let Some(directory) = std::env::var_os("TOWAVUE_REFERENCE_RENDER_DIR") {
+                let pixels = destination
+                    .renderer
+                    .as_mut()
+                    .expect("renderer")
+                    .verification_surface_rgba()
+                    .expect("track readback");
+                std::fs::write(
+                    PathBuf::from(directory).join("audio-track-muted-300x220.rgba"),
+                    pixels,
+                )
+                .expect("track reference");
+            }
+            assert!(
+                !destination
+                    .session
+                    .as_ref()
+                    .expect("muted session")
+                    .has_audio()
+            );
+            assert_eq!(destination.playback_volume(), volume);
+            destination.select_audio_track(AudioTrackSelection::Track(tracks[1]));
+            assert!(!destination.waveform_track_muted());
+            assert!(
+                destination
+                    .session
+                    .as_ref()
+                    .expect("audible session")
+                    .has_audio()
+            );
+            destination.select_audio_track(AudioTrackSelection::All);
+            assert!(
+                destination.waveform_track_muted(),
+                "All displays the first track's waveform"
+            );
+            assert!(
+                destination
+                    .session
+                    .as_ref()
+                    .expect("partial mix")
+                    .has_audio()
+            );
+            destination.dispatch(CommandId::MuteAudioTrack);
+            assert!(!destination.session.as_ref().expect("all muted").has_audio());
+            destination.dispatch(CommandId::Undo);
+            assert!(
+                destination
+                    .session
+                    .as_ref()
+                    .expect("undo partial mix")
+                    .has_audio()
+            );
+            destination.dispatch(CommandId::Redo);
+            assert!(
+                !destination
+                    .session
+                    .as_ref()
+                    .expect("redo all muted")
+                    .has_audio()
+            );
+            destination.dispatch(CommandId::MuteAudioTrack);
+            assert!(
+                destination
+                    .session
+                    .as_ref()
+                    .expect("unmute All")
+                    .has_audio()
+            );
+            assert_eq!(destination.playback_volume(), volume);
             destination.remove_tab(moved, false);
             assert!(!destination.audio_export_tracks.contains_key(&moved));
             assert!(!destination.audio_preview_choices.contains_key(&moved));

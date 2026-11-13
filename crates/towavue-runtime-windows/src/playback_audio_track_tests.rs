@@ -318,6 +318,7 @@ fn selected_audio_preserves_delays_edits_waveforms_and_session_restarts() {
             PlaybackRange::default(),
             true,
             selection,
+            Default::default(),
             |_| {},
         )
         .expect("initial audio choice");

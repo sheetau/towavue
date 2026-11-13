@@ -246,7 +246,7 @@ fn timeline_context_covers_children_without_retargeting_selection_or_seeking_in_
                         Text::CommandClearSelection.in_language(language),
                         Text::TimelineDelete.in_language(language),
                         Text::TimelineCrop.in_language(language),
-                        Text::TimelineSilence.in_language(language),
+                        Text::CommandEditSpeed.in_language(language),
                         Text::TimelinePlay.in_language(language),
                     ] {
                         let (_, node) = tree
@@ -267,7 +267,7 @@ fn timeline_context_covers_children_without_retargeting_selection_or_seeking_in_
                         assert_eq!(
                             node.is_disabled(),
                             label != Text::CommandSelectAll.in_language(language)
-                                && label != Text::TimelineSilence.in_language(language)
+                                && label != Text::CommandEditSpeed.in_language(language)
                                 && selection.is_none(),
                             "{label}"
                         );
@@ -301,7 +301,7 @@ fn timeline_context_covers_children_without_retargeting_selection_or_seeking_in_
             .iter()
             .find(|(_, node)| {
                 node.label().is_some_and(|text| {
-                    text.starts_with(Text::TimelineSilence.in_language(language))
+                    text.starts_with(Text::CommandEditSpeed.in_language(language))
                 })
             })
             .expect("silence")
@@ -315,7 +315,7 @@ fn timeline_context_covers_children_without_retargeting_selection_or_seeking_in_
             actions
                 == [UiAction::TimelineMenu(Intent {
                     owner: app.timeline_menu_owner().expect("owner"),
-                    action: Action::Silence
+                    action: Action::Speed
                 })]
         );
         assert!(!egui::Popup::is_any_open(&context));
@@ -340,7 +340,7 @@ fn timeline_context_covers_children_without_retargeting_selection_or_seeking_in_
             .iter()
             .find(|(_, node)| {
                 node.label().is_some_and(|label| {
-                    label.starts_with(Text::TimelineSilence.in_language(language))
+                    label.starts_with(Text::CommandEditSpeed.in_language(language))
                 })
             })
             .expect("silence item")
@@ -376,7 +376,7 @@ fn timeline_context_covers_children_without_retargeting_selection_or_seeking_in_
                     actions
                         == [UiAction::TimelineMenu(Intent {
                             owner: app.timeline_menu_owner().expect("owner"),
-                            action: Action::Silence
+                            action: Action::Speed
                         })]
                 );
                 assert!(!egui::Popup::is_any_open(&context));
@@ -450,14 +450,6 @@ fn timeline_commands_share_palette_menu_and_shortcut_dispatch() {
         let mut app = media_app(&root, kind);
         let tab = app.tabs.active_id().expect("tab");
         app.time_selection = Some(range());
-        app.dispatch(CommandId::SilenceTimeSelection);
-        assert_eq!(
-            app.edits[&tab].operations(),
-            &[EditOperation::Timeline(
-                towavue_core::TimelineEdit::ScaleVolume(range(), 0.0)
-            )]
-        );
-        app.dispatch(CommandId::Undo);
         app.time_selection = Some(range());
         app.dispatch(CommandId::KeepTimeSelection);
         assert_eq!(
@@ -467,10 +459,7 @@ fn timeline_commands_share_palette_menu_and_shortcut_dispatch() {
             ))]
         );
         app.dispatch(CommandId::Undo);
-        for command in [
-            CommandId::SilenceTimeSelection,
-            CommandId::KeepTimeSelection,
-        ] {
+        for command in [CommandId::DeleteTimeSelection, CommandId::KeepTimeSelection] {
             assert_eq!(
                 command
                     .as_str()
@@ -485,7 +474,7 @@ fn timeline_commands_share_palette_menu_and_shortcut_dispatch() {
         }
         for state in [PlaybackState::Loading, PlaybackState::Faulted] {
             app.state = state;
-            app.dispatch(CommandId::SilenceTimeSelection);
+            app.dispatch(CommandId::KeepTimeSelection);
             assert!(app.edits[&tab].operations().is_empty());
         }
     }
@@ -500,10 +489,6 @@ fn timeline_context_edits_current_range_and_undo_restores_history() {
     };
     let mut app = media_app(&root, MediaKind::Audio);
     for (action, edit) in [
-        (
-            Action::Silence,
-            towavue_core::TimelineEdit::ScaleVolume(range(), 0.0),
-        ),
         (Action::Crop, towavue_core::TimelineEdit::Keep(range())),
         (Action::Delete, towavue_core::TimelineEdit::Delete(range())),
     ] {
@@ -573,7 +558,7 @@ fn timeline_context_rejects_changed_owners_selection_and_blocked_views() {
     ] {
         app.handle_timeline_menu(Intent {
             owner: stale,
-            action: Action::Silence,
+            action: Action::Crop,
         });
         assert!(app.edits.is_empty());
     }
@@ -590,7 +575,7 @@ fn timeline_context_rejects_changed_owners_selection_and_blocked_views() {
         };
         app.handle_timeline_menu(Intent {
             owner,
-            action: Action::Silence,
+            action: Action::Crop,
         });
         assert!(app.edits.is_empty(), "blocked view {gate}");
     }
@@ -745,9 +730,9 @@ fn timeline_menu_outside_press_hands_off_selection_and_secondary_retargeting() {
 }
 
 #[test]
-fn silence_without_selection_edits_the_whole_timeline_and_undo_restores_gain() {
+fn zero_gain_edit_preserves_listening_volume_and_undo_restores_gain() {
     let Some(root) = crate::tests::isolated_test_root(
-        "timeline_menu::tests::silence_without_selection_edits_the_whole_timeline_and_undo_restores_gain",
+        "timeline_menu::tests::zero_gain_edit_preserves_listening_volume_and_undo_restores_gain",
     ) else {
         return;
     };
@@ -761,11 +746,12 @@ fn silence_without_selection_edits_the_whole_timeline_and_undo_restores_gain() {
         let before = app.edits[&tab].clone();
         let volume = app.playback_volume();
         app.time_selection = None;
-        assert!(app.timeline_menu_enabled(Action::Silence));
-        app.handle_timeline_menu(Intent {
-            owner: app.timeline_menu_owner().expect("owner"),
-            action: Action::Silence,
-        });
+        app.push_edit(EditOperation::Timeline(
+            towavue_core::TimelineEdit::ScaleVolume(
+                towavue_core::TimeRange::new(MediaTime::ZERO, duration).expect("whole range"),
+                0.0,
+            ),
+        ));
         let history = &app.edits[&tab];
         assert_eq!(
             history.operations().last(),
@@ -798,6 +784,6 @@ fn silence_without_selection_edits_the_whole_timeline_and_undo_restores_gain() {
                 .all(|span| span.volume() == 0.0)
         );
         app.media_duration = Some(Duration::ZERO);
-        assert!(!app.timeline_menu_enabled(Action::Silence));
+        assert!(!app.timeline_menu_enabled(Action::Speed));
     }
 }

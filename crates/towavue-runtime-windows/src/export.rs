@@ -351,7 +351,8 @@ pub(crate) fn export_options_cancellable(
     audio.hardware_encode = false;
     // Project only the worker's request; the caller retains the full video history.
     audio.operations.retain(|operation| match operation {
-        EditOperation::SetTrimStart(_)
+        EditOperation::SetAudioTrackOutput(..)
+        | EditOperation::SetTrimStart(_)
         | EditOperation::SetTrimEnd(_)
         | EditOperation::SetVolume(_)
         | EditOperation::SetRate(_)
@@ -1852,7 +1853,8 @@ fn visual_filters_with_depth(operations: &[EditOperation], high_depth: bool) -> 
             EditOperation::RotateCounterclockwise => Some("transpose=cclock".into()),
             EditOperation::FlipHorizontal => Some("hflip".into()),
             EditOperation::FlipVertical => Some("vflip".into()),
-            EditOperation::SetTrimStart(_)
+            EditOperation::SetAudioTrackOutput(..)
+            | EditOperation::SetTrimStart(_)
             | EditOperation::SetTrimEnd(_)
             | EditOperation::SetVolume(_)
             | EditOperation::SetRate(_)

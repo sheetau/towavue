@@ -602,3 +602,12 @@ viewport/edits, stale publication, gain clipping and maximum-pyramid accuracy;
 `waveform::` retains native decoder and cancellation controls. Hidden GPU checks
 are rendering evidence; inspect the normal Release window separately against the
 design, including the supplied CTI artwork and embedded application icon.
+
+Track-output changes use `audio_output_tests::`, `audio_preview::tests::`, and
+`output_edits_exclude_tracks_in_video_and_audio_exports_without_changing_gain`.
+The app control exercises hidden native track switching, All, mute/unmute,
+undo/redo, stable listening volume, and full-height status targets. It requires
+an available shared audio endpoint; an endpoint skip is not a pass. Export
+controls probe the generated files and verify empty-audio output and independent
+retention intersection. Run the workspace suite for changes spanning history,
+playback and export.

@@ -151,6 +151,7 @@ pub struct PlaybackSession {
     audio_tracks: AudioTrackCatalog,
     subtitle_tracks: Vec<towavue_core::SubtitleTrack>,
     audio_selection: AudioTrackSelection,
+    audio_output: towavue_core::AudioTrackOutput,
     source_video_frame_rate: Option<f64>,
     source_video_grid_rate: Option<f64>,
     source_video_grid_origin: MediaTime,
@@ -211,6 +212,7 @@ impl PlaybackSession {
             range,
             paused,
             AudioTrackSelection::Default,
+            Default::default(),
             notify,
         )
     }
@@ -225,6 +227,7 @@ impl PlaybackSession {
         range: PlaybackRange,
         paused: bool,
         selection: AudioTrackSelection,
+        audio_output: towavue_core::AudioTrackOutput,
         notify: impl Fn(PlaybackEvent) + Send + Sync + 'static,
     ) -> Result<Self, PlaybackError> {
         let mut session = Self::open_with_audio(
@@ -235,6 +238,7 @@ impl PlaybackSession {
             range,
             paused,
             selection,
+            audio_output,
             notify,
         )?;
         session.input_owner = Some(input);
@@ -298,6 +302,7 @@ impl PlaybackSession {
             range,
             paused,
             AudioTrackSelection::Default,
+            Default::default(),
             notify,
         )
     }
@@ -311,6 +316,7 @@ impl PlaybackSession {
         range: PlaybackRange,
         paused: bool,
         selection: AudioTrackSelection,
+        audio_output: towavue_core::AudioTrackOutput,
         notify: impl Fn(PlaybackEvent) + Send + Sync + 'static,
     ) -> Result<Self, PlaybackError> {
         // Capture before probing/starting decoders, never at Save time. Viewing
@@ -345,6 +351,7 @@ impl PlaybackSession {
             audio_tracks,
             subtitle_tracks,
             audio_selection: selection,
+            audio_output: Default::default(),
             source_video_frame_rate,
             source_video_grid_rate,
             source_video_grid_origin,
@@ -380,6 +387,7 @@ impl PlaybackSession {
             #[cfg(any(test, feature = "presentation-verification"))]
             seek_stage_ms: [0.0; 5],
         };
+        session.configure_audio_output(audio_output)?;
         session.start_pipeline()?;
         if session
             .source
@@ -523,14 +531,52 @@ impl PlaybackSession {
         if self.audio_selection == selection {
             return Ok(self.generation);
         }
-        let track = match selection {
-            AudioTrackSelection::Track(track) => Some(track),
-            AudioTrackSelection::Default | AudioTrackSelection::All => None,
-        };
-        let format = decode::probe_audio_track_format(&self.path, track)?;
+        let format = self.output_format(selection, &self.audio_output)?;
         self.audio_selection = selection;
         self.audio_format = format;
         self.seek(target)
+    }
+
+    pub fn audio_output(&self) -> &towavue_core::AudioTrackOutput {
+        &self.audio_output
+    }
+
+    /// Prepare output inclusion for the caller's immediately following seek.
+    /// The seek retires/reprimes the old WASAPI owner before starting new feeds.
+    pub fn configure_audio_output(
+        &mut self,
+        output: towavue_core::AudioTrackOutput,
+    ) -> Result<(), PlaybackError> {
+        if self.audio_output != output {
+            let format = self.output_format(self.audio_selection, &output)?;
+            self.audio_format = format;
+            self.audio_output = output;
+        }
+        Ok(())
+    }
+
+    fn output_format(
+        &self,
+        selection: AudioTrackSelection,
+        output: &towavue_core::AudioTrackOutput,
+    ) -> Result<Option<AudioFormat>, PlaybackError> {
+        let track = match selection {
+            AudioTrackSelection::Track(id) => Some(id),
+            AudioTrackSelection::Default => self.audio_tracks.preferred,
+            AudioTrackSelection::All => self
+                .audio_tracks
+                .tracks
+                .iter()
+                .find(|track| output.is_enabled(track.id))
+                .map(|track| track.id),
+        };
+        if let Some(id) = track {
+            // Validate explicit selection even if its output is disabled.
+            let format = decode::probe_audio_track_format(&self.path, Some(id))?;
+            Ok(output.is_enabled(id).then_some(format).flatten())
+        } else {
+            Ok(None)
+        }
     }
 
     /// Change transport speed without replacing the edit plan or audition bounds.
@@ -789,6 +835,7 @@ impl PlaybackSession {
                 self.audio_tracks
                     .tracks
                     .iter()
+                    .filter(|track| self.audio_output.is_enabled(track.id))
                     .map(|track| track.id)
                     .collect()
             } else {

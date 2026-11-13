@@ -144,6 +144,7 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::VolumeDown, "Down"),
         (CommandId::VolumeUp, "Up"),
         (CommandId::ToggleMute, "M"),
+        (CommandId::MuteAudioTrack, "Ctrl+Shift+M"),
         (CommandId::RateDown, "Ctrl+,"),
         (CommandId::RateUp, "Ctrl+."),
         (CommandId::PreviousVideoFrame, ","),

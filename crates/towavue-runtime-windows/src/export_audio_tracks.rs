@@ -30,12 +30,13 @@ pub(super) struct Track {
 }
 
 pub(super) fn probe(source: &Path) -> Result<Vec<Track>, ExportError> {
-    probe_selected(source, &AudioTrackRetention::All)
+    probe_selected(source, &AudioTrackRetention::All, &Default::default())
 }
 
 fn probe_selected(
     source: &Path,
     selection: &AudioTrackRetention,
+    output: &towavue_core::AudioTrackOutput,
 ) -> Result<Vec<Track>, ExportError> {
     let read = || -> Result<Vec<Track>, ExportError> {
         let failed = |error: ffmpeg::Error| ExportError::Failed(error.to_string());
@@ -60,6 +61,7 @@ fn probe_selected(
                     ids.contains(&AudioTrackId::from_index(stream.index()))
                 }
             })
+            .filter(|stream| output.is_enabled(AudioTrackId::from_index(stream.index())))
             .map(|stream| {
                 let decoder = ffmpeg::codec::context::Context::from_parameters(stream.parameters())
                     .map_err(failed)?
@@ -90,11 +92,26 @@ pub(super) fn retained(
     request: &ExportRequest,
     selection: &AudioTrackRetention,
 ) -> Result<Option<Vec<Track>>, ExportError> {
-    if request.kind != MediaKind::Video {
+    let output = EditState::from_operations(&request.operations).audio_output;
+    if request.kind != MediaKind::Video
+        && (request.kind != MediaKind::Audio || output == Default::default())
+    {
         return Ok(None);
     }
-    let tracks = probe_selected(&request.source, selection)?;
-    if *selection == AudioTrackRetention::All && tracks.len() <= 1 {
+    let mut tracks = probe_selected(&request.source, selection, &output)?;
+    if request.kind == MediaKind::Audio {
+        let input = ffmpeg::format::input(&request.source)
+            .map_err(|error| ExportError::Failed(error.to_string()))?;
+        if let Some(preferred) = input.streams().best(ffmpeg::media::Type::Audio)
+            && let Some(index) = tracks
+                .iter()
+                .position(|track| track.stream.0 == preferred.index())
+        {
+            tracks.swap(0, index);
+        }
+        tracks.truncate(1);
+    }
+    if output == Default::default() && *selection == AudioTrackRetention::All && tracks.len() <= 1 {
         // Keep ordinary single-track exports on their established path.
         return Ok(None);
     }

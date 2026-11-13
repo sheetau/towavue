@@ -76,7 +76,7 @@ pub enum CommandId {
     ApplyCrop,
     DeleteTimeSelection,
     KeepTimeSelection,
-    SilenceTimeSelection,
+    MuteAudioTrack,
     PlayTimeSelection,
     RotateClockwise,
     RotateCounterclockwise,
@@ -277,7 +277,7 @@ impl CommandId {
             Self::ApplyCrop => "apply_crop",
             Self::DeleteTimeSelection => "delete_time_selection",
             Self::KeepTimeSelection => "keep_time_selection",
-            Self::SilenceTimeSelection => "silence_time_selection",
+            Self::MuteAudioTrack => "mute_audio_track",
             Self::PlayTimeSelection => "play_time_selection",
             Self::RotateClockwise => "rotate_clockwise",
             Self::RotateCounterclockwise => "rotate_counterclockwise",
@@ -559,6 +559,7 @@ impl FromStr for KeyStroke {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct CommandContext {
     pub has_video_frame: bool,
+    pub has_audio_tracks: bool,
     pub image_transition: bool,
     pub playback_blocked: bool,
     pub timeline_open: bool,
@@ -782,8 +783,8 @@ impl CommandDefinition {
                     | CommandId::KeepTimeSelection
                     | CommandId::PlayTimeSelection
             ) || (context.timeline_open && context.has_time_selection))
-            && (self.id != CommandId::SilenceTimeSelection
-                || (context.timeline_open && !context.playback_blocked))
+            && (self.id != CommandId::MuteAudioTrack
+                || (context.timeline_open && context.has_audio_tracks && !context.playback_blocked))
             && (!matches!(self.id, CommandId::SetTrimStart | CommandId::SetTrimEnd)
                 || context.timeline_open)
             && (self.id != CommandId::ApplyCrop
@@ -930,7 +931,7 @@ const COMMANDS: &[CommandDefinition] = &[
     command(CommandId::SetTrimEnd, PLAYABLE_MEDIA),
     command(CommandId::DeleteTimeSelection, PLAYABLE_MEDIA),
     command(CommandId::KeepTimeSelection, PLAYABLE_MEDIA),
-    command(CommandId::SilenceTimeSelection, PLAYABLE_MEDIA),
+    command(CommandId::MuteAudioTrack, &[MediaKind::Video]),
     command(CommandId::VolumeDown, PLAYABLE_MEDIA),
     command(CommandId::VolumeUp, PLAYABLE_MEDIA),
     command(CommandId::ToggleMute, PLAYABLE_MEDIA),

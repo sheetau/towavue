@@ -193,6 +193,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             edit.playback_range(),
             true,
             self.audio_selection_for(Some(id), &path),
+            edit.audio_output,
             move |event| notify(AppEvent::Playback(instance, event)),
         );
         let saved = self

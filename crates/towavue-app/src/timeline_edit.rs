@@ -360,7 +360,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let range_changed = plan.is_none()
             && self.playback_selection.is_none()
             && session.range() != state.playback_range();
-        if changed || range_changed || session.rate() != rate {
+        if changed
+            || range_changed
+            || session.rate() != rate
+            || session.audio_output() != &state.audio_output
+        {
             if changed {
                 self.time_selection = None;
                 self.playback_selection = None;

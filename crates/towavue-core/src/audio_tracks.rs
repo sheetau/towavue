@@ -103,3 +103,48 @@ mod tests {
         assert_eq!(catalog.next_track(AudioTrackSelection::All), None);
     }
 }
+
+/// The target of an output edit, captured independently of the listening selection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AudioTrackTarget {
+    All,
+    Track(AudioTrackId),
+}
+
+/// Undoable track inclusion. It never changes playback volume or waveform samples.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AudioTrackOutput {
+    enabled_by_default: bool,
+    exceptions: Vec<AudioTrackId>,
+}
+
+impl Default for AudioTrackOutput {
+    fn default() -> Self {
+        Self {
+            enabled_by_default: true,
+            exceptions: Vec::new(),
+        }
+    }
+}
+
+impl AudioTrackOutput {
+    pub fn is_enabled(&self, track: AudioTrackId) -> bool {
+        self.enabled_by_default != self.exceptions.contains(&track)
+    }
+
+    pub fn set_enabled(&mut self, target: AudioTrackTarget, enabled: bool) {
+        match target {
+            AudioTrackTarget::All => {
+                self.enabled_by_default = enabled;
+                self.exceptions.clear();
+            }
+            AudioTrackTarget::Track(track) => {
+                self.exceptions.retain(|id| *id != track);
+                if enabled != self.enabled_by_default {
+                    self.exceptions.push(track);
+                    self.exceptions.sort_by_key(|id| id.index());
+                }
+            }
+        }
+    }
+}

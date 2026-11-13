@@ -12,6 +12,7 @@ mod audio_export;
 mod audio_export_tests;
 mod audio_playback;
 mod audio_preview;
+mod audio_track_controls;
 #[cfg(test)]
 mod audio_view_tests;
 mod browser_controls;
@@ -1042,7 +1043,8 @@ impl ImageTransform {
                     transform.uv.swap(0, 3);
                     transform.uv.swap(1, 2);
                 }
-                EditOperation::SetTrimStart(_)
+                EditOperation::SetAudioTrackOutput(..)
+                | EditOperation::SetTrimStart(_)
                 | EditOperation::SetTrimEnd(_)
                 | EditOperation::SetVolume(_)
                 | EditOperation::SetRate(_)
@@ -2560,6 +2562,7 @@ where
             self.edit_state().playback_range(),
             paused,
             self.audio_selection_for(self.displayed_tab, &path),
+            self.edit_state().audio_output,
             move |event| notify(AppEvent::Playback(media_generation, event)),
         ) {
             Ok(session) => {
@@ -7064,7 +7067,11 @@ where
                         mesh.add_rect_with_uv(
                             rect,
                             egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                            waveform_detail::color(),
+                            if self.waveform_track_muted() {
+                                Color32::from_gray(0x1f)
+                            } else {
+                                waveform_detail::color()
+                            },
                         );
                         waveform_painter
                             .set(waveform_slot, egui::Shape::mesh(layout.clip_waveform(mesh)));
@@ -7109,7 +7116,12 @@ where
                     result.stretch_preview,
                     Some(layout.view),
                 );
-                if let Some(mesh) = detail {
+                if let Some(mut mesh) = detail {
+                    if self.waveform_track_muted() {
+                        for vertex in &mut mesh.vertices {
+                            vertex.color = Color32::from_gray(0x1f);
+                        }
+                    }
                     waveform_painter
                         .set(waveform_slot, egui::Shape::mesh(layout.clip_waveform(mesh)));
                 } else if let Some(waveform) = &self.waveform {
@@ -7132,7 +7144,11 @@ where
                             destination,
                             uv,
                             rect,
-                            waveform_detail::color(),
+                            if self.waveform_track_muted() {
+                                Color32::from_gray(0x1f)
+                            } else {
+                                waveform_detail::color()
+                            },
                         );
                     }
                     if !mesh.is_empty() {
@@ -7833,7 +7849,7 @@ where
                     | CommandId::ApplyCrop
                     | CommandId::DeleteTimeSelection
                     | CommandId::KeepTimeSelection
-                    | CommandId::SilenceTimeSelection
+                    | CommandId::MuteAudioTrack
                     | CommandId::PlayTimeSelection
                     | CommandId::RotateClockwise
                     | CommandId::RotateCounterclockwise
@@ -8402,18 +8418,7 @@ where
                 self.set_time_selection_endpoint(false);
             }
             CommandId::PlayTimeSelection => self.play_time_selection(),
-            CommandId::SilenceTimeSelection => {
-                if let Some(range) = self.time_selection.or_else(|| {
-                    towavue_core::TimeRange::new(
-                        MediaTime::ZERO,
-                        media_time(self.playback_duration()?),
-                    )
-                }) {
-                    self.push_edit(EditOperation::Timeline(
-                        towavue_core::TimelineEdit::ScaleVolume(range, 0.0),
-                    ));
-                }
-            }
+            CommandId::MuteAudioTrack => self.toggle_audio_track_output(),
             CommandId::DeleteTimeSelection | CommandId::KeepTimeSelection => {
                 if let Some(range) = self.time_selection {
                     self.push_edit(EditOperation::Timeline(
@@ -10865,16 +10870,18 @@ where
         let session = self.session.as_mut()?;
         let pause =
             self.state == PlaybackState::Ended || end == Some(target) || !range.contains(target);
-        let result = match plan {
-            Some(plan) => session.seek_with_timeline_selection(
-                target,
-                rate,
-                plan,
-                self.playback_selection,
-                pause,
-            ),
-            None => session.seek_with_edits(target, rate, range, pause),
-        };
+        let result = session
+            .configure_audio_output(edit.audio_output)
+            .and_then(|()| match plan {
+                Some(plan) => session.seek_with_timeline_selection(
+                    target,
+                    rate,
+                    plan,
+                    self.playback_selection,
+                    pause,
+                ),
+                None => session.seek_with_edits(target, rate, range, pause),
+            });
         match result {
             Ok(generation) => {
                 if pause {
@@ -11736,6 +11743,10 @@ where
 
     fn command_context(&self) -> CommandContext {
         CommandContext {
+            has_audio_tracks: self
+                .session
+                .as_ref()
+                .is_some_and(|session| !session.audio_tracks().tracks.is_empty()),
             has_video_frame: self
                 .session
                 .as_ref()

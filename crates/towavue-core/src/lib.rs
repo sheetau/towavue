@@ -26,7 +26,8 @@ use std::time::Duration;
 
 pub use audio_queue::{AudioQueue, RepeatMode};
 pub use audio_tracks::{
-    AudioTrack, AudioTrackCatalog, AudioTrackId, AudioTrackRetention, AudioTrackSelection,
+    AudioTrack, AudioTrackCatalog, AudioTrackId, AudioTrackOutput, AudioTrackRetention,
+    AudioTrackSelection, AudioTrackTarget,
 };
 pub use commands::{
     CommandContext, CommandDefinition, CommandId, Key, KeySequence, KeyStroke, Modifiers,

@@ -259,7 +259,7 @@ mod tests {
                 ("倍速", CommandId::RateUp),
                 ("巻き戻し", CommandId::SeekBackward),
                 ("crop selection", CommandId::KeepTimeSelection),
-                ("mute selection", CommandId::SilenceTimeSelection),
+                ("exclude track", CommandId::MuteAudioTrack),
                 ("hotkeys", CommandId::OpenKeyboardSettings),
                 ("explorer", CommandId::RevealFile),
                 ("snapshot", CommandId::ExportFrame),

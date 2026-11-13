@@ -455,3 +455,59 @@ fn each_retained_track_keeps_its_rate_and_receives_independent_normalization() {
     );
     fs::remove_dir_all(root).expect("owned cleanup");
 }
+
+#[test]
+fn output_edits_exclude_tracks_in_video_and_audio_exports_without_changing_gain() {
+    use towavue_core::AudioTrackTarget;
+    let (root, source) = fixture("mute-output");
+    let ids: Vec<_> = probe(&source)
+        .expect("source tracks")
+        .iter()
+        .map(|track| AudioTrackId::from_index(track.stream.0))
+        .collect();
+    assert_eq!(ids.len(), 2);
+    for (name, target, expected) in [
+        ("one", AudioTrackTarget::Track(ids[0]), 1),
+        ("none", AudioTrackTarget::All, 0),
+    ] {
+        let operations = vec![EditOperation::SetAudioTrackOutput(target, false)];
+        let export = request(&source, root.join(format!("{name}.mkv")), operations);
+        let retained = retained(&export, &AudioTrackRetention::All)
+            .expect("retention")
+            .expect("no default-track fallback");
+        assert_eq!(retained.len(), expected);
+        if expected == 1 {
+            assert_eq!(retained[0].stream.0, ids[1].index());
+        }
+        export_media(&export).expect("video output excludes muted tracks");
+        assert_eq!(probe(&export.target).expect("output probe").len(), expected);
+        let mut audio = export.clone();
+        audio.target = root.join(format!("{name}.wav"));
+        let result = export_media_with_output(&audio, ExportOutput::AudioOnly);
+        if expected == 0 {
+            assert!(matches!(
+                result,
+                Err(ExportError::Message(Text::ExportSourceHasNoAudio))
+            ));
+            assert!(!audio.target.exists());
+        } else {
+            result.expect("audio extraction from included track");
+            assert_eq!(probe(&audio.target).expect("audio probe").len(), 1);
+        }
+    }
+    let export = request(
+        &source,
+        root.join("intersection.mkv"),
+        vec![EditOperation::SetAudioTrackOutput(
+            AudioTrackTarget::Track(ids[0]),
+            false,
+        )],
+    );
+    assert!(
+        retained(&export, &AudioTrackRetention::Selected(vec![ids[0]]))
+            .expect("intersection")
+            .expect("explicit empty")
+            .is_empty()
+    );
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}

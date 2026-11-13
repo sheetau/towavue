@@ -81,6 +81,140 @@ pub(super) struct Month {
     pub offset: f32,
 }
 
+/// Filmstrip owns its keyboard/restore offset, but shares Gallery's rail motion.
+pub(super) fn advance_offset(context: &egui::Context, scroll_id: egui::Id) -> Option<f32> {
+    let moving = context
+        .data(|data| data.get_temp::<Motion>(scroll_id.with("rail-motion")))
+        .is_some();
+    advance(context, scroll_id);
+    moving.then(|| {
+        egui::scroll_area::State::load(context, scroll_id)
+            .unwrap_or_default()
+            .offset
+            .y
+    })
+}
+
+/// Date-free rail: the thumb is the viewport, markers are document identities.
+pub(super) fn show_positions<R>(
+    ui: &mut egui::Ui,
+    output: &mut egui::scroll_area::ScrollAreaOutput<R>,
+    rect: egui::Rect,
+    count: usize,
+    current: Option<usize>,
+    selected: Option<usize>,
+) {
+    if count == 0 || rect.height() < 12.0 {
+        return;
+    }
+    let maximum = (output.content_size.y - output.inner_rect.height()).max(0.0);
+    let layout = output.id.with((count, maximum.to_bits()));
+    let fraction = fraction_at(maximum, output.state.offset.y);
+    let motion_id = output.id.with("rail-motion");
+    if ui
+        .data(|data| data.get_temp::<Motion>(motion_id))
+        .is_some_and(|motion| {
+            motion.layout != layout || (motion.offset - output.state.offset.y).abs() > 0.01
+        })
+    {
+        ui.data_mut(|data| data.remove::<Motion>(motion_id));
+    }
+    let pixel = 1.0 / ui.ctx().pixels_per_point();
+    let height = (rect.height() * output.inner_rect.height() / output.content_size.y.max(1.0))
+        .clamp(pixel, rect.height());
+    let left = ((rect.left() + rect.width() * 0.075) / pixel).round() * pixel;
+    let right = ((rect.right() - rect.width() * 0.075) / pixel).round() * pixel;
+    ui.interact(rect, output.id.with(1_usize), egui::Sense::hover());
+    let response = ui.interact(
+        rect,
+        output.id.with("position-rail"),
+        egui::Sense::click_and_drag(),
+    );
+    let thumb = egui::Rect::from_min_max(
+        egui::pos2(left, rect.top() + fraction * (rect.height() - height)),
+        egui::pos2(
+            right,
+            rect.top() + fraction * (rect.height() - height) + height,
+        ),
+    );
+    let mut target = None;
+    if (response.clicked()
+        || response.is_pointer_button_down_on()
+        || response.dragged()
+        || response.drag_stopped())
+        && let Some(point) = response.interact_pointer_pos()
+    {
+        target = Some(((point.y - rect.top()) / rect.height()).clamp(0.0, 1.0));
+    }
+    let handle = ui.interact(
+        thumb,
+        output.id.with("thumb"),
+        egui::Sense::click_and_drag(),
+    );
+    let anchor_id = output.id.with("thumb-anchor");
+    if handle.enabled()
+        && (handle.is_pointer_button_down_on() || handle.dragged() || handle.drag_stopped())
+    {
+        if let Some(point) = handle.interact_pointer_pos() {
+            let anchor = ui.data_mut(|data| {
+                *data.get_temp_mut_or_insert_with(anchor_id, || DragAnchor {
+                    pointer: point.y,
+                    fraction,
+                })
+            });
+            target = Some(
+                (anchor.fraction + (point.y - anchor.pointer) / (rect.height() - height).max(1.0))
+                    .clamp(0.0, 1.0),
+            );
+        }
+    } else {
+        ui.data_mut(|data| data.remove::<DragAnchor>(anchor_id));
+    }
+    if let Some(target) = target.filter(|_| ui.is_enabled() && maximum > 0.0) {
+        let now = ui.input(|input| input.time);
+        let mut motion = ui
+            .data(|data| data.get_temp::<Motion>(motion_id))
+            .unwrap_or(Motion {
+                layout,
+                fraction,
+                target,
+                offset: output.state.offset.y,
+                maximum,
+                time: now,
+                pass: ui.ctx().cumulative_pass_nr(),
+            });
+        motion.target = target;
+        motion.time = now;
+        ui.data_mut(|data| data.insert_temp(motion_id, motion));
+        ui.ctx().request_repaint();
+    }
+    let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+    painter.rect_filled(thumb, 0.0, chrome::SURFACE);
+    for (index, color) in [
+        (
+            current.filter(|index| Some(*index) != selected),
+            chrome::MUTED,
+        ),
+        (selected, chrome::FOREGROUND),
+    ] {
+        if let Some(index) = index {
+            let fraction = index as f32 / count.saturating_sub(1).max(1) as f32;
+            let y = (((rect.top() + fraction * rect.height() - pixel * 0.5) / pixel).round()
+                * pixel)
+                .clamp(
+                    (rect.top() / pixel).ceil() * pixel,
+                    (rect.bottom() / pixel).floor() * pixel - pixel,
+                );
+            painter.rect_filled(
+                egui::Rect::from_min_max(egui::pos2(left, y), egui::pos2(right, y + pixel)),
+                0.0,
+                color,
+            );
+        }
+    }
+    crate::wheel_input::record_scroll_area(ui, output);
+}
+
 impl Month {
     fn label(&self, language: Language) -> String {
         match self.date {
@@ -348,6 +482,8 @@ pub(super) fn show(
     crate::wheel_input::record_scroll_area(ui, output);
 }
 
+#[cfg(test)]
+mod positions_tests;
 #[cfg(test)]
 mod tests;
 

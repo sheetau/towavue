@@ -42,7 +42,7 @@ fn frame(
 ) -> (egui::FullOutput, Vec<UiAction>) {
     let mut actions = Vec::new();
     let output = context.run_ui(input, |_| {
-        strip.show(
+        strip.show_legacy_horizontal(
             context,
             context.content_rect(),
             Some(snapshot),
@@ -571,7 +571,7 @@ fn filmstrip_scrollbar_drag_keeps_columns_fixed_through_loading_and_release() {
         let moved = grab + egui::vec2(20.0, 0.0);
         render(&mut strip, vec![egui::Event::PointerMoved(moved)]);
         let before = strip.scroll_offset;
-        let width = strip.layout.width(944.0);
+        let width = strip.layout.extent(944.0);
         let anchor = strip.layout.nearest(before);
         let texture = context.load_texture(
             "late-portrait",
@@ -584,7 +584,7 @@ fn filmstrip_scrollbar_drag_keeps_columns_fixed_through_loading_and_release() {
         for _ in 0..5 {
             let output = render(&mut strip, vec![]);
             assert_eq!(
-                strip.layout.width(944.0),
+                strip.layout.extent(944.0),
                 width,
                 "loading must not change the drag metric"
             );
@@ -610,12 +610,12 @@ fn filmstrip_scrollbar_drag_keeps_columns_fixed_through_loading_and_release() {
             vec![pointer(moved + egui::vec2(15.0, 0.0), false)],
         );
         assert_eq!(
-            strip.layout.width(944.0),
+            strip.layout.extent(944.0),
             width,
             "fixed columns also survive the release event"
         );
         render(&mut strip, vec![]);
-        assert_eq!(strip.layout.width(944.0), width);
+        assert_eq!(strip.layout.extent(944.0), width);
         assert!(
             (strip.layout.center_offset(released_anchor) - strip.scroll_offset - center).abs()
                 < 0.01,
@@ -655,7 +655,7 @@ fn filmstrip_folder_updates_retain_focus_without_moving_the_viewport() {
             let draw = |app: &mut Application<_>, snapshot: &FolderSnapshot, events| {
                 let mut actions = Vec::new();
                 let output = context.run_ui(input(events), |_| {
-                    app.filmstrip.show(
+                    app.filmstrip.show_legacy_horizontal(
                         &context,
                         context.content_rect(),
                         Some(snapshot),
@@ -868,7 +868,7 @@ fn filmstrip_tab_navigation_uses_current_order_after_folder_updates() {
                             },
                         )]),
                         |_| {
-                            app.filmstrip.show(
+                            app.filmstrip.show_legacy_horizontal(
                                 &context,
                                 context.content_rect(),
                                 Some(&snapshot),
@@ -1684,7 +1684,7 @@ fn unified_target_trial(root: &Path, density: f32, discard: bool) {
                  input| {
         let mut actions = Vec::new();
         let output = context.run_ui(input, |_| {
-            strip.show(
+            strip.show_legacy_horizontal(
                 context,
                 context.content_rect(),
                 Some(snapshot),
@@ -2186,7 +2186,7 @@ fn filmstrip_media_bounds_own_dimming_wheel_and_scrollbar_without_dragging_cards
                 ..input(events)
             },
             |_| {
-                strip.show(
+                strip.show_legacy_horizontal(
                     &context,
                     media,
                     Some(&snapshot),
@@ -2511,7 +2511,7 @@ fn filmstrip_empty_space_keeps_open_and_respects_disabled_loading_and_drag() {
         let mut render = |events| {
             let mut actions = Vec::new();
             let _ = context.run_ui(input(events), |_| {
-                strip.show(
+                strip.show_legacy_horizontal(
                     &context,
                     media,
                     (!loading).then_some(&snapshot),
@@ -3041,7 +3041,7 @@ fn filmstrip_pending_order_and_deliveries_do_not_interrupt_swipes_or_momentum() 
                 app.media_kind = Some(MediaKind::Image);
                 app.folder_snapshot = Some(listing.clone());
                 app.filmstrip_open = true;
-                let origin = egui::pos2(680.0, 180.0);
+                let origin = egui::pos2(20.0, 400.0);
                 let mut offsets = Vec::new();
                 for step in 0..32 {
                     if refresh {
@@ -3063,7 +3063,7 @@ fn filmstrip_pending_order_and_deliveries_do_not_interrupt_swipes_or_momentum() 
                         }
                     }
                     let point =
-                        origin - egui::vec2(20.0 * (step as f32 - 4.0).clamp(0.0, 5.0), 0.0);
+                        origin - egui::vec2(0.0, 20.0 * (step as f32 - 4.0).clamp(0.0, 5.0));
                     let events = match step {
                         0..=3 => vec![egui::Event::PointerMoved(origin)],
                         4 => vec![pointer(origin, true)],
@@ -3126,7 +3126,7 @@ fn filmstrip_blank_swipe_tracks_pointer_with_velocity_sensitive_brakeable_moment
                 raw.time = Some(time);
                 let mut actions = Vec::new();
                 let _ = context.run_ui(raw, |_| {
-                    strip.show(
+                    strip.show_legacy_horizontal(
                         &context,
                         context.content_rect(),
                         Some(&snapshot),
@@ -3314,7 +3314,7 @@ fn filmstrip_repeated_swipes_accumulate_and_pointer_departure_keeps_momentum() {
                 raw.time = Some(time);
                 let mut actions = Vec::new();
                 let _ = context.run_ui(raw, |_| {
-                    strip.show(
+                    strip.show_legacy_horizontal(
                         &context,
                         context.content_rect(),
                         Some(&snapshot),
@@ -3505,7 +3505,7 @@ fn filmstrip_card_drag_enters_transfer_only_after_leaving_the_band() {
                 Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(960.0, 32.0)),
                 None,
             );
-            strip.show(
+            strip.show_legacy_horizontal(
                 context,
                 context.content_rect(),
                 Some(snapshot),
@@ -3672,7 +3672,7 @@ fn filmstrip_file_mutations_keep_the_open_view_through_pending_and_changed_order
         context.enable_accesskit();
         let mut listing = snapshot(&folder);
         listing.items.clear();
-        for index in 0..50 {
+        for index in 0..150 {
             let path = folder.join(format!("{index:02}.bmp"));
             crate::tab_transfer::tests::bitmap(&path);
             listing.items.push(FolderMediaItem {
@@ -3681,8 +3681,8 @@ fn filmstrip_file_mutations_keep_the_open_view_through_pending_and_changed_order
                 kind: MediaKind::Image,
             });
         }
-        let current = listing.items[10].path.clone();
-        let source = listing.items[if active_source { 10 } else { 9 }]
+        let current = listing.items[100].path.clone();
+        let source = listing.items[if active_source { 100 } else { 99 }]
             .path
             .clone();
         let renamed = folder.join("renamed.bmp");

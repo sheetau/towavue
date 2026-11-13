@@ -10,6 +10,7 @@ pub(super) struct Layout {
     key: Option<(PathBuf, u64, std::time::SystemTime, usize)>,
     indices: HashMap<PathBuf, usize>,
     sizes: Vec<Vec2>,
+    pub grid: Option<grid::Grid>,
 }
 
 pub(super) fn size(source: Vec2) -> Vec2 {
@@ -74,16 +75,29 @@ impl Layout {
     }
 
     pub fn center_offset(&self, index: usize) -> f32 {
+        if let Some(grid) = self.grid {
+            return grid.offset(index, self.sizes.len());
+        }
         index as f32 * (DIAMETER + GAP)
     }
 
     pub fn nearest(&self, offset: f32) -> usize {
+        if let Some(grid) = self.grid {
+            return (((offset + grid.viewport * 0.5 - GALLERY_GAP) / grid.pitch())
+                .floor()
+                .max(0.0) as usize
+                * grid.columns)
+                .min(self.sizes.len().saturating_sub(1));
+        }
         // Prefer the left column at an exact midpoint.
         ((offset / (DIAMETER + GAP) - 0.5).ceil().max(0.0) as usize)
             .min(self.sizes.len().saturating_sub(1))
     }
 
-    pub fn width(&self, viewport: f32) -> f32 {
+    pub fn extent(&self, viewport: f32) -> f32 {
+        if let Some(grid) = self.grid {
+            return grid.height(self.sizes.len()).max(viewport);
+        }
         self.sizes
             .len()
             .checked_sub(1)
@@ -91,6 +105,9 @@ impl Layout {
     }
 
     pub fn rect(&self, index: usize, origin: egui::Pos2, viewport: Vec2) -> Rect {
+        if let Some(grid) = self.grid {
+            return grid.rect(index, origin, self.sizes[index]);
+        }
         Rect::from_center_size(
             origin
                 + egui::vec2(
@@ -102,6 +119,9 @@ impl Layout {
     }
 
     pub fn visible(&self, viewport: Rect) -> Range<usize> {
+        if let Some(grid) = self.grid {
+            return grid.visible(viewport, self.sizes.len());
+        }
         let half = viewport.width() * 0.5;
         // Include bracket edge pixels while keeping the working set bounded.
         let radius = DIAMETER * 0.5 + indicator::GAP;

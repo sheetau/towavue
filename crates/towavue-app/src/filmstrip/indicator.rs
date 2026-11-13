@@ -166,7 +166,7 @@ mod tests {
                     },
                     |_| {
                         let mut actions = Vec::new();
-                        strip.show(
+                        strip.show_legacy_horizontal(
                             &context,
                             context.content_rect(),
                             Some(&snapshot),

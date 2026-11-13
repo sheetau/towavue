@@ -78,7 +78,7 @@ fn gallery_and_filmstrip_durations_are_centered_and_audio_pixels_are_tinted() {
                             if gallery {
                                 strip.show_recent(ui, &paths, 1, enabled, &mut actions);
                             } else {
-                                strip.show(
+                                strip.show_legacy_horizontal(
                                     ui.ctx(),
                                     ui.max_rect(),
                                     Some(&snapshot),

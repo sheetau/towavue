@@ -59,6 +59,9 @@ pub(crate) enum PreparationPolicy {
 }
 
 mod drag;
+mod grid;
+#[cfg(test)]
+mod grid_tests;
 mod indicator;
 mod layout;
 pub(crate) mod swipe;
@@ -814,7 +817,7 @@ impl Filmstrip {
     }
 
     #[cfg(test)]
-    pub fn show(
+    pub fn show_legacy_horizontal(
         &mut self,
         context: &Context,
         media_rect: Rect,
@@ -823,8 +826,8 @@ impl Filmstrip {
         enabled: bool,
         actions: &mut Vec<UiAction>,
     ) {
-        self.show_with_header(
-            context, media_rect, snapshot, current, enabled, actions, 0.0, media_rect,
+        self.show_layout_with_header(
+            context, media_rect, snapshot, current, enabled, actions, 0.0, media_rect, false,
         );
     }
 
@@ -840,8 +843,62 @@ impl Filmstrip {
         header_height: f32,
         backdrop: Rect,
     ) {
+        self.show_layout_with_header(
+            context,
+            media_rect,
+            snapshot,
+            current,
+            enabled,
+            actions,
+            header_height,
+            backdrop,
+            true,
+        );
+    }
+
+    #[expect(clippy::too_many_arguments)]
+    fn show_layout_with_header(
+        &mut self,
+        context: &Context,
+        media_rect: Rect,
+        snapshot: Option<&FolderSnapshot>,
+        current: Option<&Path>,
+        enabled: bool,
+        actions: &mut Vec<UiAction>,
+        header_height: f32,
+        backdrop: Rect,
+        grid: bool,
+    ) {
         let language = localization::language(context);
         let screen = media_rect.intersect(context.content_rect());
+        let padding = screen.shrink(8.0_f32.min(screen.size().min_elem().max(0.0) * 0.25));
+        let inset = if grid {
+            Rect::from_min_max(
+                egui::pos2(padding.left(), screen.top()),
+                egui::pos2(padding.right(), screen.bottom()),
+            )
+        } else {
+            padding
+        };
+        let geometry = grid.then(|| grid::Grid::new(screen, inset));
+        let reflow_anchor = self
+            .layout
+            .grid
+            .zip(geometry)
+            .filter(|(old, new)| old != new)
+            .map(|(old, _)| {
+                if self.scroll_offset <= 0.0 {
+                    return 0;
+                }
+                let nearest = self.layout.nearest(self.scroll_offset);
+                self.selection
+                    .as_deref()
+                    .and_then(|path| self.layout.index(path))
+                    .filter(|index| index / old.columns == nearest / old.columns)
+                    .unwrap_or(nearest)
+            });
+        self.layout.grid = geometry;
+        let columns = self.layout.grid.map_or(1, |grid| grid.columns);
         self.drag.begin(context, snapshot, current, screen, enabled);
         let pointer = context.input(|input| input.pointer.hover_pos());
         let pointer_moved = self.window_focused
@@ -929,6 +986,8 @@ impl Filmstrip {
                                     egui::Key::Tab,
                                     egui::Key::ArrowLeft,
                                     egui::Key::ArrowRight,
+                                    egui::Key::ArrowUp,
+                                    egui::Key::ArrowDown,
                                     egui::Key::A,
                                     egui::Key::D,
                                 ]
@@ -972,9 +1031,12 @@ impl Filmstrip {
                                 egui::Key::Tab
                                     | egui::Key::ArrowLeft
                                     | egui::Key::ArrowRight
+                                    | egui::Key::ArrowUp
+                                    | egui::Key::ArrowDown
                                     | egui::Key::A
                                     | egui::Key::D
                             ))
+                            && (grid || !matches!(key, egui::Key::ArrowUp | egui::Key::ArrowDown))
                             && (*modifiers == egui::Modifiers::NONE
                                 || (*key == egui::Key::Tab && *modifiers == egui::Modifiers::SHIFT))
                         {
@@ -982,6 +1044,8 @@ impl Filmstrip {
                                 egui::Key::Tab if modifiers.shift => (target + count - 1) % count,
                                 egui::Key::Tab => (target + 1) % count,
                                 egui::Key::A | egui::Key::ArrowLeft => target.saturating_sub(1),
+                                egui::Key::ArrowUp if grid => target.saturating_sub(columns),
+                                egui::Key::ArrowDown if grid => (target + columns).min(count - 1),
                                 _ => (target + 1).min(count - 1),
                             };
                             changed = true;
@@ -1041,6 +1105,15 @@ impl Filmstrip {
         // Only explicit navigation/reopening may recenter it.
         let snap = recenter || (self.focus_requested && !self.animate_focus);
         let restore = self.restore_scroll && snapshot.is_some();
+        let reflow = reflow_anchor.filter(|_| !snap && !restore);
+        if let Some(anchor) = reflow {
+            // DPI startup and resizing can change columns after a sizing pass.
+            // Keep the center row's document instead of clamping its old pixel
+            // offset to an unrelated row in the new grid.
+            self.scroll_offset = self.layout.center_offset(anchor);
+            self.page_target = None;
+            self.swipe.clear();
+        }
         let was_scrolling = self.scroll_target.is_some() || self.page_target.is_some();
         // Keyboard navigation owns selection until it reaches its destination.
         // Fresh pointer movement can take over on a subsequent idle frame.
@@ -1058,7 +1131,7 @@ impl Filmstrip {
             .flatten();
         let pointer_takeover =
             can_focus && pointer_target.is_some_and(|(_, index)| self.scroll_target != Some(index));
-        if snap || restore || tab_target.is_some() || pages != 0 {
+        if snap || restore || reflow.is_some() || tab_target.is_some() || pages != 0 {
             // egui smooths wheels in shared InputState as well as ScrollArea.
             // A reopened view must not inherit that tail, including extra passes.
             self.wheel_reset_frame = Some(frame);
@@ -1100,8 +1173,8 @@ impl Filmstrip {
                     .flatten()
             });
         if pages != 0 && !snap {
-            let page = (screen.width() - 16.0).max(1.0);
-            let maximum = self.layout.width(page) - page;
+            let page = if grid { inset.height() } else { inset.width() }.max(1.0);
+            let maximum = self.layout.extent(page) - page;
             self.page_target = Some(
                 (self.page_target.unwrap_or(self.scroll_offset) + pages as f32 * page)
                     .clamp(0.0, maximum),
@@ -1197,7 +1270,10 @@ impl Filmstrip {
                 }
                 ui.style_mut().always_scroll_the_only_direction = true;
                 ui.spacing_mut().scroll.bar_width = 5.0;
-                let inset = screen.shrink(8.0_f32.min(screen.size().min_elem().max(0.0) * 0.25));
+                let rail = Rect::from_min_max(
+                    egui::pos2(padding.right() - 32.0, padding.top()),
+                    egui::pos2(padding.right(), padding.bottom()),
+                );
                 // Keep wheel ownership across the full dimmed panel, including
                 // the gutter outside the inset scroll area's hit regions.
                 let gutter_scroll = if wheel_enabled
@@ -1217,44 +1293,80 @@ impl Filmstrip {
                 };
                 let background =
                     ui.interact(screen, ui.id().with("filmstrip-swipe"), egui::Sense::drag());
-                let content_width = self.layout.width(inset.width());
-                self.swipe.update(
-                    &background,
-                    snapshot,
-                    current,
-                    &mut self.scroll_offset,
-                    (content_width - inset.width()).max(0.0),
-                    recenter || self.focus_requested || tab_target.is_some(),
-                );
+                let content_extent =
+                    self.layout
+                        .extent(if grid { inset.height() } else { inset.width() });
+                if grid {
+                    self.swipe.update_vertical(
+                        &background,
+                        ui.id()
+                            .with(("filmstrip-grid", &snapshot.folder_path, current)),
+                        &mut self.scroll_offset,
+                        (content_extent - inset.height()).max(0.0),
+                        recenter || self.focus_requested || tab_target.is_some(),
+                    );
+                } else {
+                    self.swipe.update(
+                        &background,
+                        snapshot,
+                        current,
+                        &mut self.scroll_offset,
+                        (content_extent - inset.width()).max(0.0),
+                        recenter || self.focus_requested || tab_target.is_some(),
+                    );
+                }
                 let mut scroll_ui = ui.new_child(egui::UiBuilder::new().max_rect(inset));
                 let ui = &mut scroll_ui;
-                if snap || restore || pages != 0 {
+                let scroll_id = ui.make_persistent_id(egui::IdSalt::new("filmstrip-scroll"));
+                if grid
+                    && !snap
+                    && !restore
+                    && self.scroll_target.is_none()
+                    && self.page_target.is_none()
+                    && let Some(offset) = crate::gallery_rail::advance_offset(context, scroll_id)
+                {
+                    self.scroll_offset = offset;
+                }
+                if snap || restore || reflow.is_some() || pages != 0 {
                     // Retire egui's pending reveal target, wheel velocity and drag
                     // state before the first presentation of a reopened strip.
                     let mut state = egui::scroll_area::State::default();
-                    state.offset.x = self.scroll_offset;
+                    if grid {
+                        state.offset.y = self.scroll_offset;
+                    } else {
+                        state.offset.x = self.scroll_offset;
+                    }
                     state.store(
                         context,
                         ui.make_persistent_id(egui::IdSalt::new("filmstrip-scroll")),
                     );
                 }
-                let scroll = egui::ScrollArea::horizontal()
-                    .id_salt("filmstrip-scroll")
-                    .scroll_source(egui::scroll_area::ScrollSource {
-                        drag: egui::scroll_area::DragScroll::Never,
-                        mouse_wheel: wheel_enabled,
-                        ..Default::default()
-                    })
-                    // The fixed card geometry determines overflow before the first sizing pass.
-                    .scroll_bar_visibility(if content_width > inset.width() {
-                        egui::scroll_area::ScrollBarVisibility::AlwaysVisible
-                    } else {
-                        egui::scroll_area::ScrollBarVisibility::AlwaysHidden
-                    })
-                    .horizontal_scroll_offset(self.scroll_offset - gutter_scroll)
-                    .auto_shrink([false, false])
-                    .max_height(inset.height());
-                let output = scroll.show_viewport_styled(ui, |ui, viewport| {
+                let scroll = if grid {
+                    egui::ScrollArea::vertical()
+                } else {
+                    egui::ScrollArea::horizontal()
+                }
+                .content_margin(egui::Margin::ZERO)
+                .id_salt("filmstrip-scroll")
+                .scroll_source(egui::scroll_area::ScrollSource {
+                    drag: egui::scroll_area::DragScroll::Never,
+                    mouse_wheel: wheel_enabled,
+                    ..Default::default()
+                })
+                // The fixed card geometry determines overflow before the first sizing pass.
+                .scroll_bar_visibility(if !grid && content_extent > inset.width() {
+                    egui::scroll_area::ScrollBarVisibility::AlwaysVisible
+                } else {
+                    egui::scroll_area::ScrollBarVisibility::AlwaysHidden
+                })
+                .scroll_offset(if grid {
+                    egui::vec2(0.0, self.scroll_offset - gutter_scroll)
+                } else {
+                    egui::vec2(self.scroll_offset - gutter_scroll, 0.0)
+                })
+                .auto_shrink([false, false])
+                .max_height(inset.height());
+                let mut output = scroll.show_viewport_styled(ui, |ui, viewport| {
                     // The scrollbar keeps its inset track; cards and their hit regions
                     // extend through the side gutters to the media boundary.
                     let mut clip = ui.clip_rect();
@@ -1262,7 +1374,11 @@ impl Filmstrip {
                     clip.max.x = screen.right();
                     ui.set_clip_rect(clip);
                     let origin = ui.min_rect().min;
-                    ui.set_min_size(egui::vec2(content_width, viewport.height()));
+                    ui.set_min_size(if grid {
+                        egui::vec2(viewport.width(), content_extent)
+                    } else {
+                        egui::vec2(content_extent, viewport.height())
+                    });
                     let range = self.layout.visible(viewport);
                     let mut indices: Vec<_> = range.clone().collect();
                     if let Some(target) = focus_target
@@ -1279,15 +1395,19 @@ impl Filmstrip {
                     });
                     // Reserve a stable caption band independent of aspect or filename.
                     // Compact windows elide sooner so the position above stays visible.
-                    let caption_rows = ((ui.clip_rect().height()
-                        - layout::DIAMETER
-                        - 2.0 * indicator::GAP
-                        - 2.0 * indicator::TEXT_GAP
-                        - row_height
-                        - 4.0)
-                        / row_height)
-                        .floor()
-                        .clamp(1.0, 4.0) as usize;
+                    let caption_rows = if grid {
+                        2
+                    } else {
+                        ((ui.clip_rect().height()
+                            - layout::DIAMETER
+                            - 2.0 * indicator::GAP
+                            - 2.0 * indicator::TEXT_GAP
+                            - row_height
+                            - 4.0)
+                            / row_height)
+                            .floor()
+                            .clamp(1.0, 4.0) as usize
+                    };
                     let center_y = (origin.y + viewport.height() * 0.5 - header_height * 0.5).min(
                         ui.clip_rect().bottom()
                             - layout::DIAMETER * 0.5
@@ -1296,7 +1416,11 @@ impl Filmstrip {
                             - row_height * caption_rows as f32
                             - 2.0,
                     );
-                    let offset_y = center_y - (origin.y + viewport.height() * 0.5);
+                    let offset_y = if grid {
+                        0.0
+                    } else {
+                        center_y - (origin.y + viewport.height() * 0.5)
+                    };
                     let card_rect = |index| {
                         let rect = self
                             .layout
@@ -1376,7 +1500,15 @@ impl Filmstrip {
                         if !deleted {
                             let mut drag_response = response.clone();
                             drag_response.rect = presented_rect;
-                            self.drag.observe(&drag_response, &item.path);
+                            if grid {
+                                self.drag.observe_recent(
+                                    &drag_response,
+                                    &item.path,
+                                    presented_rect,
+                                );
+                            } else {
+                                self.drag.observe(&drag_response, &item.path);
+                            }
                         }
                         if focus_target == Some(index)
                             && response.enabled()
@@ -1511,14 +1643,24 @@ impl Filmstrip {
                                 caption,
                                 FontId::proportional(crate::hover_help::TEXT_SIZE),
                                 crate::chrome::FOREGROUND,
-                                indicator::TEXT_WIDTH,
+                                if grid {
+                                    self.layout
+                                        .grid
+                                        .expect("grid geometry")
+                                        .cell
+                                        .min(GALLERY_DIAMETER)
+                                } else {
+                                    indicator::TEXT_WIDTH
+                                },
                             );
                             job.wrap.max_rows = if below { caption_rows } else { 1 };
                             let text = ui.painter().layout_job(job);
                             let y = if below {
-                                bounds.bottom() + indicator::TEXT_GAP
+                                bounds.bottom() + if grid { 4.0 } else { indicator::TEXT_GAP }
                             } else {
-                                bounds.top() - indicator::TEXT_GAP - text.size().y
+                                bounds.top()
+                                    - if grid { 4.0 } else { indicator::TEXT_GAP }
+                                    - text.size().y
                             };
                             ui.painter().galley(
                                 egui::pos2(bounds.left(), y),
@@ -1528,7 +1670,25 @@ impl Filmstrip {
                         }
                     }
                 });
-                self.scroll_offset = output.state.offset.x;
+                if grid {
+                    let selection = self
+                        .selection
+                        .as_deref()
+                        .and_then(|path| self.layout.index(path));
+                    crate::gallery_rail::show_positions(
+                        ui,
+                        &mut output,
+                        rail,
+                        snapshot.items.len(),
+                        selected,
+                        selection,
+                    );
+                }
+                self.scroll_offset = if grid {
+                    output.state.offset.y
+                } else {
+                    output.state.offset.x
+                };
                 self.restore_scroll = false;
                 self.swipe.exclusions.clear();
                 self.swipe
@@ -1538,6 +1698,9 @@ impl Filmstrip {
                             .read_response(*id)
                             .map(|response| response.interact_rect)
                     }));
+                if grid {
+                    self.swipe.exclusions.push(rail);
+                }
                 if let Some(bar) = context.read_response(output.id.with(0usize)) {
                     self.swipe.exclusions.push(bar.interact_rect);
                 }
@@ -1617,18 +1780,7 @@ impl Filmstrip {
         let origin = ui.cursor().top();
         let width = ui.available_width();
         const GAP: f32 = GALLERY_GAP;
-        let mut columns = (((width + GAP) / (GALLERY_DIAMETER + GAP)).floor() as usize).max(1);
-        // Large windows use larger cards instead of exceeding the existing
-        // thumbnail working set and leaving visible cells without requests.
-        while columns > 1 {
-            let cell = (width - (columns - 1) as f32 * GAP) / columns as f32;
-            let rows = (ui.clip_rect().height() / (cell + GAP)).ceil() as usize + 1;
-            if columns.saturating_mul(rows) <= VISIBLE_PREVIEW_LIMIT {
-                break;
-            }
-            columns -= 1;
-        }
-        let cell_width = ((width - (columns - 1) as f32 * GAP) / columns as f32).max(1.0);
+        let (columns, cell_width) = grid::gallery_cells(width, ui.clip_rect().height());
         let cell_height = cell_width;
         let row_height = cell_height + GAP;
         let row_count = paths.len().div_ceil(columns);
@@ -4529,7 +4681,7 @@ mod tests {
                         ..Default::default()
                     },
                     |_| {
-                        strip.show(
+                        strip.show_legacy_horizontal(
                             &context,
                             screen,
                             Some(&snapshot),
@@ -4686,7 +4838,7 @@ mod tests {
                     ..Default::default()
                 },
                 |_| {
-                    strip.show(
+                    strip.show_legacy_horizontal(
                         &context,
                         context.content_rect(),
                         snapshot,
@@ -4844,7 +4996,7 @@ mod tests {
                             },
                             |_| {
                                 let mut actions = Vec::new();
-                                strip.show(
+                                strip.show_legacy_horizontal(
                                     &context,
                                     context.content_rect(),
                                     Some(&snapshot),
@@ -4969,7 +5121,7 @@ mod tests {
                     ..Default::default()
                 },
                 |_| {
-                    strip.show(
+                    strip.show_legacy_horizontal(
                         &context,
                         context.content_rect(),
                         Some(snapshot),
@@ -5172,7 +5324,7 @@ mod tests {
                                 ..Default::default()
                             },
                             |ui| match mode {
-                                0 => strip.show(
+                                0 => strip.show_legacy_horizontal(
                                     &context,
                                     context.content_rect(),
                                     Some(&snapshot),
@@ -5402,7 +5554,7 @@ mod tests {
         };
         for pass in 0..3 {
             let output = context.run_ui(Default::default(), |_| {
-                strip.show(
+                strip.show_legacy_horizontal(
                     &context,
                     context.content_rect(),
                     Some(&snapshot),
@@ -5493,7 +5645,7 @@ mod tests {
                     ..Default::default()
                 },
                 |_| {
-                    filmstrip.show(
+                    filmstrip.show_legacy_horizontal(
                         &context,
                         context.content_rect(),
                         Some(&snapshot),

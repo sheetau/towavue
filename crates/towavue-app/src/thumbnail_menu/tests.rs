@@ -274,7 +274,7 @@ fn thumbnail_context_menus_keep_exact_target_in_language(language: crate::locali
                             "context menu must not activate a row"
                         );
                     }
-                    Scope::Filmstrip => strip.show(
+                    Scope::Filmstrip => strip.show_legacy_horizontal(
                         ui.ctx(),
                         ui.max_rect(),
                         Some(&listing),

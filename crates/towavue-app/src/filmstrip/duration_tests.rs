@@ -326,7 +326,7 @@ fn gallery_image_bounds_own_hover_and_clicks_while_cell_whitespace_stays_inert()
         let halfway = frame(vec![]);
         assert_eq!(halfway.0, idle, "zoom retains frame and input bounds");
         assert!(halfway.3.width() < 1.0 && halfway.3.width() > 1.0 / 1.15);
-        for _ in 0..4 {
+        for _ in 0..40 {
             frame(vec![]);
         }
         let zoomed = frame(vec![]);
@@ -451,7 +451,8 @@ fn gallery_grid_reaches_gpu_without_card_backgrounds() {
                 let height = (740.0 * density) as u32;
                 renderer.resize_surface(width, height).expect("surface");
                 let mut idle_bounds: Option<Rect> = None;
-                for frame in 0..8 {
+                let mut audio_hover: Option<Rect> = None;
+                for frame in 0..32 {
                     let mut input = egui::RawInput {
                         screen_rect: Some(Rect::from_min_size(
                             egui::Pos2::ZERO,
@@ -468,9 +469,11 @@ fn gallery_grid_reaches_gpu_without_card_backgrounds() {
                         .or_default()
                         .native_pixels_per_point = Some(density);
                     if frame >= 3 {
-                        input.events.push(egui::Event::PointerMoved(
-                            idle_bounds.expect("idle bounds").center(),
-                        ));
+                        input.events.push(egui::Event::PointerMoved(if frame >= 16 {
+                            audio_hover.expect("audio panel").center()
+                        } else {
+                            idle_bounds.expect("idle bounds").center()
+                        }));
                     }
                     let output = context.run_ui(input, |ui| {
                         ui.painter()
@@ -525,6 +528,7 @@ fn gallery_grid_reaches_gpu_without_card_backgrounds() {
                         panic!("audio background before waveform");
                     };
                     let audio_bounds = audio_background.rect;
+                    audio_hover = Some(audio_bounds);
                     if frame == 2 {
                         idle_bounds = Some(bounds);
                     }
@@ -549,7 +553,7 @@ fn gallery_grid_reaches_gpu_without_card_backgrounds() {
                         .expect("one-pixel rail marker");
                     renderer.clear([0.0, 0.0, 0.0, 1.0]).expect("clear");
                     renderer.render_ui(&context, output).expect("UI");
-                    if frame == 2 || frame == 7 {
+                    if frame == 2 || frame == 7 || frame == 31 {
                         let pixels = renderer.verification_surface_rgba().expect("readback");
                         // A square cell corner lies outside its inscribed thumbnail.
                         let at = |x: f32, y: f32| {
@@ -584,6 +588,16 @@ fn gallery_grid_reaches_gpu_without_card_backgrounds() {
                             at(audio_bounds.left() + 8.0, audio_bounds.bottom() - 3.0),
                             &crate::chrome::BORDER.to_array()
                         );
+                        if frame == 31 {
+                            assert_eq!(
+                                at(
+                                    audio_bounds.center().x,
+                                    audio_bounds.center().y - audio_bounds.height() * 0.36
+                                ),
+                                &crate::chrome::MUTED.to_array(),
+                                "zoom expands waveform beyond its original two-thirds height"
+                            );
+                        }
                         assert_eq!(
                             at(bounds.center().x, bounds.center().y),
                             &[70, 115, 180, 255]

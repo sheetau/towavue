@@ -62,6 +62,7 @@ mod drag;
 mod grid;
 #[cfg(test)]
 mod grid_tests;
+mod hover_zoom;
 mod indicator;
 mod layout;
 pub(crate) mod swipe;
@@ -1841,12 +1842,7 @@ impl Filmstrip {
                             .ctx()
                             .read_response(id)
                             .is_some_and(|response| response.hovered() || response.has_focus());
-                    let hover = ui.ctx().animate_bool_with_time_and_easing(
-                        id.with("gallery-hover"),
-                        hovered,
-                        0.32,
-                        |t| 1.0 - (1.0 - t).powi(5),
-                    );
+                    let hover = hover_zoom::value(ui.ctx(), id.with("gallery-hover"), hovered);
                     let uv = self
                         .gallery_video_uvs
                         .get(path)
@@ -1935,15 +1931,19 @@ impl Filmstrip {
                             } else {
                                 image_rect
                             };
+                            let scaled = Rect::from_center_size(
+                                target.center(),
+                                target.size() * (1.0 + 0.15 * hover),
+                            );
+                            let clipped = scaled.intersect(image_rect);
+                            let sampled = egui::emath::RectTransform::from_to(scaled, uv)
+                                .transform_rect(clipped);
                             crate::media_preview::image_rounded(
                                 ui,
                                 texture.id(),
-                                target,
-                                Rect::from_center_size(
-                                    uv.center(),
-                                    uv.size() / (1.0 + 0.15 * hover),
-                                ),
-                                target,
+                                clipped,
+                                sampled,
+                                image_rect,
                                 egui::CornerRadius::ZERO,
                                 thumbnail_tint(kind),
                             );

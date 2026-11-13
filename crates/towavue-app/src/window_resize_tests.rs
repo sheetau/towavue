@@ -330,3 +330,92 @@ fn initial_duplicate_minimized_and_unchanged_fullscreen_notifications_preserve_z
         assert_eq!(app.image_view, view);
     }
 }
+
+#[test]
+fn native_position_notifications_do_not_queue_client_redraws() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use winit::platform::windows::EventLoopBuilderExtWindows;
+    let Some(_) = tests::isolated_test_root(
+        "window_resize_tests::native_position_notifications_do_not_queue_client_redraws",
+    ) else {
+        return;
+    };
+    struct Trial(EventLoopProxy<window_host::Event>);
+    impl ApplicationHandler<window_host::Event> for Trial {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            let window = Arc::new(
+                event_loop
+                    .create_window(
+                        Window::default_attributes()
+                            .with_visible(false)
+                            .with_active(false)
+                            .with_inner_size(PhysicalSize::new(640, 400)),
+                    )
+                    .expect("owned hidden move fixture"),
+            );
+            let context = fonts::test_context();
+            let state = egui_winit::State::new(
+                context.clone(),
+                egui::ViewportId::ROOT,
+                &window,
+                Some(window.scale_factor() as f32),
+                window.theme(),
+                None,
+            );
+            let requests = Arc::new(AtomicUsize::new(0));
+            let observed = requests.clone();
+            let mut app = Application::new(None, move |event| {
+                if matches!(event, AppEvent::Redraw) {
+                    observed.fetch_add(1, Ordering::Relaxed);
+                }
+            })
+            .expect("app");
+            app.window = Some(window.clone());
+            app.window_size = Some(window.inner_size());
+            app.event_loop_proxy = Some(self.0.clone());
+            app.ui_context = Some(context);
+            app.ui_state = Some(state);
+            for playback in [PlaybackState::Paused, PlaybackState::Playing] {
+                app.state = playback;
+                let before = requests.load(Ordering::Relaxed);
+                for x in 0..256 {
+                    app.redraw_queued.set(false);
+                    app.window_event(
+                        event_loop,
+                        window.id(),
+                        WindowEvent::Moved(winit::dpi::PhysicalPosition::new(x, 20)),
+                    );
+                }
+                assert_eq!(
+                    requests.load(Ordering::Relaxed),
+                    before,
+                    "position-only notifications must not repaint the client"
+                );
+                app.redraw_queued.set(false);
+                app.window_event(event_loop, window.id(), WindowEvent::Occluded(false));
+                assert_eq!(
+                    requests.load(Ordering::Relaxed),
+                    before + 1,
+                    "visibility changes still require a repaint"
+                );
+                app.redraw_queued.set(false);
+                app.request_redraw();
+                assert_eq!(
+                    requests.load(Ordering::Relaxed),
+                    before + 2,
+                    "independent media/UI redraws remain live while moving"
+                );
+            }
+            event_loop.exit();
+        }
+        fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
+    }
+    let event_loop = EventLoop::<window_host::Event>::with_user_event()
+        .with_any_thread(true)
+        .build()
+        .expect("event loop");
+    let mut trial = Trial(event_loop.create_proxy());
+    event_loop
+        .run_app(&mut trial)
+        .expect("native move notification control");
+}

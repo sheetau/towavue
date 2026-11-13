@@ -13531,10 +13531,13 @@ where
             self.cancel_hold_speed();
         }
         // Redraw renders below; resize owns its synchronous or queued repaint.
+        // Position-only moves retain the same client pixels. Repainting each Moved
+        // event makes presentation block native dragging; DPI, resize, visibility,
+        // playback and UI changes retain their independent repaint paths.
         if repaint
             && !matches!(
                 event,
-                WindowEvent::RedrawRequested | WindowEvent::Resized(_)
+                WindowEvent::RedrawRequested | WindowEvent::Resized(_) | WindowEvent::Moved(_)
             )
         {
             self.request_redraw();

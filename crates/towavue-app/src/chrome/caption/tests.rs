@@ -118,10 +118,15 @@ fn caption_controls_stop_above_toolbar_separator() {
     }
     impl winit::application::ApplicationHandler for Trial {
         fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-            let window = event_loop
-                .create_window(winit::window::Window::default_attributes().with_visible(false))
-                .expect("hidden window");
-            let mut renderer = towavue_runtime_windows::FrameRenderer::new(&window).expect("D3D11");
+            let window = std::sync::Arc::new(
+                event_loop
+                    .create_window(winit::window::Window::default_attributes().with_visible(false))
+                    .expect("hidden window"),
+            );
+            let caption = towavue_runtime_windows::NativeCaption::new(window).expect("caption");
+            let mut renderer =
+                towavue_runtime_windows::FrameRenderer::with_native_caption(&caption)
+                    .expect("caption compositor surface");
             let output_dir = std::env::var_os("TOWAVUE_REFERENCE_RENDER_DIR")
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|| self.root.clone());
@@ -138,6 +143,14 @@ fn caption_controls_stop_above_toolbar_separator() {
                         renderer.render_ui(&context, output).expect("UI");
                     }
                     let pixels = renderer.verification_surface_rgba().expect("readback");
+                    assert!(
+                        pixels
+                            .as_chunks::<4>()
+                            .0
+                            .iter()
+                            .all(|pixel| pixel[3] == 255),
+                        "caption and translucent edges retain an opaque composition scene"
+                    );
                     for button in controls(density, maximized) {
                         let mut glyph_pixels = 0;
                         for y in button.bounds.top() as usize..button.bounds.bottom() as usize {

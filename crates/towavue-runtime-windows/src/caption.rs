@@ -710,19 +710,30 @@ pub(crate) struct CaptionSurface {
 
 impl CaptionSurface {
     pub(crate) fn new(caption: &NativeCaption) -> windows::core::Result<Self> {
-        Self::create(caption, true)
+        Self::create(caption, true, false)
     }
 
-    pub(crate) fn new_hidden(caption: &NativeCaption) -> windows::core::Result<Self> {
-        Self::create(caption, false)
+    pub(crate) fn new_composition(
+        caption: &NativeCaption,
+        visible: bool,
+    ) -> windows::core::Result<Self> {
+        Self::create(caption, visible, true)
     }
 
-    fn create(caption: &NativeCaption, visible: bool) -> windows::core::Result<Self> {
+    fn create(
+        caption: &NativeCaption,
+        visible: bool,
+        composition: bool,
+    ) -> windows::core::Result<Self> {
         // SAFETY: standard window class; no borrowed creation data. The child is
         // owned below and remains on the parent's thread for its entire lifetime.
         let handle = unsafe {
             CreateWindowExW(
-                WINDOW_EX_STYLE::default(),
+                if composition {
+                    WS_EX_NOREDIRECTIONBITMAP
+                } else {
+                    WINDOW_EX_STYLE::default()
+                },
                 w!("STATIC"),
                 w!(""),
                 WS_CHILD
@@ -788,7 +799,7 @@ fn top_resize_hit(point: POINT, rect: RECT, border: i32, height: f32) -> Option<
 impl Drop for CaptionSurface {
     fn drop(&mut self) {
         // SAFETY: the retained HWND is thread-bound; parent outlives its child. The renderer
-        // drops its swap chain before this surface and never exposes this handle.
+        // detaches composition and drops its swap chain before this surface; no handle escapes.
         unsafe {
             let _ = DestroyWindow(self.handle);
         }

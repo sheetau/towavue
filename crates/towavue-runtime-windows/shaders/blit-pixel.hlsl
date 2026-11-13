@@ -13,6 +13,9 @@ float4 main(float4 position : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGET {
     float2 half_texel = 0.5 / float2(width, height);
     float2 opposite = origin.xy + x_axis.xy + y_axis.xy;
     float2 sample_uv = origin.xy + uv.x * x_axis.xy + uv.y * y_axis.xy;
-    return source_texture.Sample(source_sampler,
+    float4 color = source_texture.Sample(source_sampler,
         clamp(sample_uv, min(origin.xy, opposite) + half_texel, max(origin.xy, opposite) - half_texel));
+    // Preserve the viewer's opaque RGB presentation without modifying source or
+    // exported alpha. The composition surface must not expose the desktop.
+    return float4(color.rgb, 1.0);
 }

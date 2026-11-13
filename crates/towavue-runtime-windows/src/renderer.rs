@@ -4,6 +4,8 @@ pub(crate) mod preroll_pacing;
 
 pub(crate) mod startup;
 
+mod composition;
+
 #[cfg(feature = "render-verification")]
 mod verification;
 #[cfg(feature = "render-verification")]
@@ -352,6 +354,8 @@ pub struct FrameRenderer {
     graphics_device: GraphicsDevice,
     max_texture_side: usize,
     context: ID3D11DeviceContext,
+    // Drop the composition graph before the swap chain and its owned child HWND.
+    _composition: Option<composition::Surface>,
     swap_chain: IDXGISwapChain,
     buffer_dimensions: Option<(u32, u32)>,
     #[cfg(feature = "render-verification")]
@@ -380,7 +384,7 @@ impl FrameRenderer {
     }
 
     pub fn with_native_caption(caption: &crate::NativeCaption) -> Result<Self, RenderError> {
-        let surface = crate::caption::CaptionSurface::new(caption)?;
+        let surface = crate::caption::CaptionSurface::new_composition(caption, true)?;
         Self::for_handle(surface.handle, Some(surface), None)
     }
 
@@ -410,7 +414,7 @@ impl FrameRenderer {
         caption: &crate::NativeCaption,
         graphics_device: GraphicsDevice,
     ) -> Result<Self, RenderError> {
-        let surface = crate::caption::CaptionSurface::new(caption)?;
+        let surface = crate::caption::CaptionSurface::new_composition(caption, true)?;
         Self::for_handle(surface.handle, Some(surface), Some(graphics_device))
     }
 
@@ -419,7 +423,7 @@ impl FrameRenderer {
         caption_surface: Option<crate::caption::CaptionSurface>,
         graphics_device: Option<GraphicsDevice>,
     ) -> Result<Self, RenderError> {
-        let description = DXGI_SWAP_CHAIN_DESC1 {
+        let mut description = DXGI_SWAP_CHAIN_DESC1 {
             Width: 1,
             Height: 1,
             Format: DXGI_FORMAT_R8G8B8A8_UNORM,
@@ -472,20 +476,38 @@ impl FrameRenderer {
             let _ = multithread.SetMultithreadProtected(true);
         }
         let dxgi_device: IDXGIDevice = device.cast()?;
-        // Use the device's own factory and one owned flip chain per HWND. During
-        // resize, keep the old UI anchored until ResizeBuffers and the next draw;
-        // legacy CreateSwapChain implicitly stretches it to the new window size.
-        // The HWND and shared device outlive this chain on the event-loop thread.
-        let swap_chain = unsafe {
+        // Caption surfaces bind a pixel-sized visual to the compositor rather
+        // than presenting a full-client HWND flip surface. This preserves all
+        // custom controls without the former native-caption region cutout.
+        // The visual has no scale transform: its old buffer stays anchored while
+        // the child resizes, even though composition requires SCALING_STRETCH.
+        // The shared device and owned child outlive the graph and swap chain.
+        let (swap_chain, composition) = unsafe {
             let factory: IDXGIFactory2 = dxgi_device.GetAdapter()?.GetParent()?;
-            let chain = factory.CreateSwapChainForHwnd(&device, hwnd, &description, None, None)?;
+            let chain = if caption_surface.is_some() {
+                // UI composition uses premultiplied alpha. The scene remains
+                // opaque: clear, video output and UI blending retain alpha one.
+                description.AlphaMode =
+                    windows::Win32::Graphics::Dxgi::Common::DXGI_ALPHA_MODE_PREMULTIPLIED;
+                description.Scaling = windows::Win32::Graphics::Dxgi::DXGI_SCALING_STRETCH;
+                description.SwapEffect =
+                    windows::Win32::Graphics::Dxgi::DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+                factory.CreateSwapChainForComposition(&device, &description, None)?
+            } else {
+                factory.CreateSwapChainForHwnd(&device, hwnd, &description, None, None)?
+            };
             chain.SetBackgroundColor(&DXGI_RGBA {
                 r: 0.0,
                 g: 0.0,
                 b: 0.0,
                 a: 1.0,
             })?;
-            chain.cast()?
+            let composition = if caption_surface.is_some() {
+                Some(composition::Surface::new(&dxgi_device, hwnd, &chain)?)
+            } else {
+                None
+            };
+            (chain.cast()?, composition)
         };
         // GetAdapter returns an owned COM reference and GetDesc copies the LUID;
         // both temporary values are released before this constructor returns.
@@ -507,6 +529,7 @@ impl FrameRenderer {
                 },
             },
             context,
+            _composition: composition,
             swap_chain,
             buffer_dimensions: None,
             #[cfg(feature = "render-verification")]
@@ -1144,6 +1167,11 @@ impl FrameRenderer {
             context.VideoProcessorSetStreamSourceRect(&processor, 0, true, Some(&source));
             context.VideoProcessorSetStreamDestRect(&processor, 0, true, Some(&destination));
             context.VideoProcessorSetOutputTargetRect(&processor, true, Some(&destination));
+            context.VideoProcessorSetOutputAlphaFillMode(
+                &processor,
+                windows::Win32::Graphics::Direct3D11::D3D11_VIDEO_PROCESSOR_ALPHA_FILL_MODE_OPAQUE,
+                0,
+            );
             self.video_processor = Some(VideoProcessorState {
                 dimensions: (width, height, output_width, output_height),
                 device,

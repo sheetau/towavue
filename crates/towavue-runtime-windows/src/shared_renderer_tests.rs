@@ -97,10 +97,92 @@ fn draw(renderer: &mut FrameRenderer, session: &mut PlaybackSession) -> Vec<u8> 
         .render_ui(&context, output)
         .expect("independent UI renderer");
     let result = pixels(renderer);
+    assert!(
+        result
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| pixel[3] == 255),
+        "hardware media and UI must keep the composition scene opaque"
+    );
     let offset = (6 * width as usize + 6) * 4;
     assert_eq!(&result[offset..offset + 4], &[255, 0, 255, 255]);
     renderer.present_surface().expect("present");
     result
+}
+
+fn assert_opaque_software_media_and_translucent_ui(renderer: &mut FrameRenderer) {
+    renderer
+        .resize_surface(16, 8)
+        .expect("opacity fixture size");
+    renderer.clear([0.0, 0.0, 0.0, 1.0]).expect("opaque clear");
+    let source = vec![20, 60, 90, 0, 80, 40, 10, 128];
+    let frame = VideoFrame {
+        presentation_time: towavue_core::MediaTime::ZERO,
+        duration: None,
+        width: 2,
+        height: 1,
+        pixel_aspect: 1.0,
+        orientation: Default::default(),
+        rgba: source.clone(),
+    };
+    renderer
+        .draw_software(
+            &frame,
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(2.0, 1.0)),
+            [
+                UnitPoint { x: 0.0, y: 0.0 },
+                UnitPoint { x: 1.0, y: 0.0 },
+                UnitPoint { x: 1.0, y: 1.0 },
+                UnitPoint { x: 0.0, y: 1.0 },
+            ],
+            None,
+        )
+        .expect("software frame with transparent source pixels");
+    let context = egui::Context::default();
+    let texture = context.load_texture(
+        "translucent image",
+        egui::ColorImage::new(
+            [2, 1],
+            vec![
+                egui::Color32::TRANSPARENT,
+                egui::Color32::from_rgba_unmultiplied(40, 120, 200, 128),
+            ],
+        ),
+        egui::TextureOptions::NEAREST,
+    );
+    let output = context.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(16.0, 8.0),
+            )),
+            ..Default::default()
+        },
+        |ui| {
+            ui.painter().image(
+                texture.id(),
+                egui::Rect::from_min_size(egui::pos2(4.0, 2.0), egui::vec2(4.0, 2.0)),
+                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        },
+    );
+    renderer
+        .render_ui(&context, output)
+        .expect("translucent image UI");
+    let drawn = pixels(renderer);
+    assert_eq!(
+        &drawn[..8],
+        &[20, 60, 90, 255, 80, 40, 10, 255],
+        "software display retains the previous RGB even for nonopaque source alpha"
+    );
+    assert!(
+        drawn.as_chunks::<4>().0.iter().all(|pixel| pixel[3] == 255),
+        "transparent image UI must blend over an opaque viewer scene"
+    );
+    assert_eq!(frame.rgba, source, "display must not rewrite source alpha");
+    renderer.present_surface().expect("present opaque scene");
 }
 
 #[test]
@@ -161,12 +243,40 @@ fn window_surfaces_do_not_stretch_old_ui_during_resize() {
                 // Query the live, owned swap chain; this is a presentation-policy
                 // check, not a screenshot or physical interactive-resize claim.
                 let desc = unsafe { chain.GetDesc1() }.expect("live descriptor");
+                let composited = renderer.caption_surface.is_some();
+                assert_eq!(renderer._composition.is_some(), composited);
                 assert_eq!(
                     desc.Scaling,
-                    windows::Win32::Graphics::Dxgi::DXGI_SCALING_NONE,
-                    "old UI pixels must not be stretched before the next sized frame"
+                    if composited {
+                        windows::Win32::Graphics::Dxgi::DXGI_SCALING_STRETCH
+                    } else {
+                        windows::Win32::Graphics::Dxgi::DXGI_SCALING_NONE
+                    }
                 );
-                assert_eq!(desc.SwapEffect, DXGI_SWAP_EFFECT_FLIP_DISCARD);
+                assert_eq!(
+                    desc.SwapEffect,
+                    if composited {
+                        windows::Win32::Graphics::Dxgi::DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL
+                    } else {
+                        DXGI_SWAP_EFFECT_FLIP_DISCARD
+                    }
+                );
+                if let Some(surface) = &renderer.caption_surface {
+                    use windows::Win32::UI::WindowsAndMessaging::{
+                        GWL_EXSTYLE, GetWindowLongPtrW, WS_EX_NOREDIRECTIONBITMAP,
+                    };
+                    // SAFETY: retained test-owned child, scalar style query.
+                    let style = unsafe { GetWindowLongPtrW(surface.handle, GWL_EXSTYLE) } as u32;
+                    assert_ne!(style & WS_EX_NOREDIRECTIONBITMAP.0, 0);
+                }
+                assert_eq!(
+                    desc.AlphaMode,
+                    if composited {
+                        windows::Win32::Graphics::Dxgi::Common::DXGI_ALPHA_MODE_PREMULTIPLIED
+                    } else {
+                        windows::Win32::Graphics::Dxgi::Common::DXGI_ALPHA_MODE_IGNORE
+                    }
+                );
                 assert_eq!(desc.BufferCount, 2);
                 let background = unsafe { chain.GetBackgroundColor() }.expect("background");
                 assert_eq!(
@@ -180,17 +290,17 @@ fn window_surfaces_do_not_stretch_old_ui_during_resize() {
                         .expect("clear sized buffer");
                     assert_eq!(pixels(renderer).len(), width as usize * height as usize * 4);
                     renderer.present_surface().expect("present sized surface");
-                    let desc = unsafe { chain.GetDesc1() }.expect("resized descriptor");
-                    assert_eq!((desc.Width, desc.Height), (width, height));
-                    assert_eq!(
-                        desc.Scaling,
-                        windows::Win32::Graphics::Dxgi::DXGI_SCALING_NONE
-                    );
+                    let resized = unsafe { chain.GetDesc1() }.expect("resized descriptor");
+                    assert_eq!((resized.Width, resized.Height), (width, height));
+                    assert_eq!(resized.Scaling, desc.Scaling);
+                    assert_eq!(resized.SwapEffect, desc.SwapEffect);
+                    assert_eq!(resized.AlphaMode, desc.AlphaMode);
                 }
+                assert_opaque_software_media_and_translucent_ui(renderer);
             }
             self.0 = true;
             eprintln!(
-                "PASS native resize policy: standalone and shared caption surfaces, four sizes, unscaled flip-discard and opaque black background"
+                "PASS native resize policy: standalone and shared caption surfaces, four sizes, standalone unscaled HWND and caption pixel-sized composition, opaque black background"
             );
             event_loop.exit();
         }
@@ -294,6 +404,17 @@ fn shared_window_surfaces_preserve_live_hardware_session() {
             assert_eq!(draw(&mut first, &mut session), expected);
             second.release_surface();
             assert_eq!(draw(&mut first, &mut session), expected);
+            for _ in 0..3 {
+                let mut replacement =
+                    FrameRenderer::with_native_caption_on_device(&caption, first.graphics_device())
+                        .expect("replacement composition graph");
+                replacement
+                    .resize_surface(240, 144)
+                    .expect("replacement size");
+                assert_eq!(draw(&mut replacement, &mut session), expected);
+                replacement.release_surface();
+                assert_eq!(draw(&mut first, &mut session), expected);
+            }
             assert_eq!(session.generation(), generation);
             assert_eq!(session.current_video_time(), time);
             assert_eq!(session.metrics().cpu_transfer_count, 0);

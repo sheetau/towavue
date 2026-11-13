@@ -379,7 +379,7 @@ impl StartupSurface {
         context: &egui::Context,
         device: GraphicsDevice,
     ) -> Result<FrameRenderer, RenderError> {
-        let gpu_surface = CaptionSurface::new_hidden(caption)?;
+        let gpu_surface = CaptionSurface::new_composition(caption, false)?;
         let gpu_hwnd = gpu_surface.handle;
         let mut renderer = FrameRenderer::for_handle(gpu_hwnd, Some(gpu_surface), Some(device))?;
         // Explicit playback can need a device while the parent is minimized.
@@ -402,8 +402,9 @@ impl StartupSurface {
             .as_ref()
             .expect("caption surface")
             .handle;
-        // Both children retain the same native-caption region. Complete the native
-        // visibility batch before retiring the GDI child; no HWND changes its API.
+        // Both children cover the complete client. Publish the composition child
+        // only after its first complete Present, then retire the GDI child in
+        // the same visibility batch. No HWND changes its presentation API.
         unsafe {
             let batch = BeginDeferWindowPos(2)?;
             let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;

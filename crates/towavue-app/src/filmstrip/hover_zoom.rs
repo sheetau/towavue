@@ -12,8 +12,8 @@ impl Motion {
         let dt = (now - self.time).clamp(0.0, 0.05) as f32;
         self.time = now;
         // An analytic critically damped spring keeps position and velocity when
-        // hover reverses. It approaches both ends gently over roughly 0.8 s.
-        let omega = 9.0;
+        // hover reverses. It approaches both ends gently over roughly 0.6 s.
+        let omega = 12.0;
         let delta = self.value - target;
         let slope = self.velocity + omega * delta;
         let decay = (-omega * dt).exp();

@@ -1,4 +1,6 @@
 use crate::*;
+
+mod icon;
 use towavue_core::{AudioTrackSelection, AudioTrackTarget};
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
@@ -326,28 +328,13 @@ fn paint_mute(ui: &egui::Ui, rect: egui::Rect, muted: bool, hot: bool) {
             chrome::SURFACE
         },
     );
-    let points = [
-        (11.5, 11.5),
-        (11.5, 4.5),
-        (8.0, 8.0),
-        (4.5, 4.5),
-        (4.5, 11.5),
-    ]
-    .map(|(x, y)| icon.min + egui::vec2(x, y));
-    // Separate segments and half-stroke disks give round joins and caps without
-    // the miter protrusions of a multi-segment egui path.
-    for pair in points.windows(2) {
-        ui.painter()
-            .line_segment([pair[0], pair[1]], egui::Stroke::new(1.0, ink));
-    }
-    for point in points {
-        ui.painter().circle_filled(point, 0.5, ink);
-    }
+    icon::paint(ui, icon, ink);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use towavue_core::{AudioTrack, AudioTrackCatalog, AudioTrackId, AudioTrackOutput};
 
     #[test]
@@ -397,6 +384,7 @@ mod tests {
                         ..Default::default()
                     },
                     |ui| {
+                        crate::overlay_input::dismiss_menu_on_outside_press(ui.ctx());
                         ui.add_space(190.0);
                         bounds = controls.show(ui, &mut Vec::new()).rect;
                     },
@@ -441,22 +429,15 @@ mod tests {
                     _ => None,
                 })
                 .expect("muted background");
-            let points: Vec<_> = result
+            let glyph = result
                 .shapes
                 .iter()
-                .filter_map(|shape| match &shape.shape {
-                    egui::Shape::Circle(circle)
-                        if circle.radius == 0.5 && background.contains(circle.center) =>
-                    {
-                        Some(circle.center)
-                    }
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Mesh(mesh) if mesh.calc_bounds() == background => Some(mesh),
                     _ => None,
                 })
-                .collect();
-            assert_eq!(points.len(), 5);
-            let bounds = egui::Rect::from_points(&points);
-            assert_eq!(bounds.size(), egui::vec2(7.0, 7.0));
-            assert!(bounds.center().distance(background.center()) < 0.001);
+                .expect("single rasterized M");
+            assert_eq!(glyph.calc_bounds().center(), background.center());
             let point = selector.center();
             let button = |pressed| egui::Event::PointerButton {
                 pos: point,
@@ -508,6 +489,22 @@ mod tests {
                         || text.fallback_color == chrome::FOREGROUND
                 );
             }
+            draw(vec![egui::Event::PointerMoved(point), button(true)]);
+            assert!(
+                !egui::Popup::is_any_open(&context),
+                "host prepass leaves repress closure to the opener"
+            );
+            draw(vec![button(false)]);
+            assert!(
+                !egui::Popup::is_any_open(&context),
+                "release does not reopen track selector"
+            );
+            draw(vec![button(true)]);
+            draw(vec![button(false)]);
+            assert!(
+                egui::Popup::is_any_open(&context),
+                "a fresh click opens again"
+            );
         }
     }
 }

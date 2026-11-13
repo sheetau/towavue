@@ -11,6 +11,7 @@ struct Toggle {
 /// The matching release and discarded sizing passes must not reopen it.
 pub fn menu_popup(response: &Response, popup: Id) -> Popup<'static> {
     let context: &Context = &response.ctx;
+    crate::overlay_input::menu_opener_shown(context, popup, response.id);
     let id = popup.with("opener-toggle");
     let frame = context.cumulative_frame_nr();
     let mut state = context

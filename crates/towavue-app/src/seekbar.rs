@@ -355,7 +355,7 @@ pub fn ratio(rect: Rect, x: f32) -> f32 {
 }
 
 fn compact_radius(rect: Rect) -> f32 {
-    (rect.width() * 0.5).clamp(0.0, 5.0)
+    (rect.width() * 0.5).clamp(0.0, 6.0)
 }
 
 fn compact_travel(rect: Rect) -> Rect {
@@ -454,7 +454,7 @@ mod tests {
                                     _ => None,
                                 })
                                 .expect("animated handle");
-                            let radius = (width * 0.5_f32).min(5.0) * expansion;
+                            let radius = (width * 0.5_f32).min(6.0) * expansion;
                             assert!((circle.radius - radius).abs() < 0.001);
                             let value = if reversed { 1.0 - progress } else { progress };
                             assert!(
@@ -596,7 +596,7 @@ mod tests {
                             pointer.x.clamp(track.rect.left(), track.rect.right())
                         );
                         assert_eq!(preview.rect.y_range(), track.rect.y_range());
-                        assert_eq!(played.rect.right(), 5.0 + 490.0 * value);
+                        assert_eq!(played.rect.right(), 6.0 + 488.0 * value);
                         assert_eq!(played.rect.y_range(), preview.rect.y_range());
                     }
                 }
@@ -788,7 +788,7 @@ mod tests {
                                 .expect("played track");
                             assert!((played.rect.right() - circle.center.x).abs() < 0.001);
                         };
-                        let committed = (end.x - 5.0) / 490.0;
+                        let committed = (end.x - 6.0) / 488.0;
                         assert_position(&output, committed);
                         let (commits, output) = frame(vec![], committed, false);
                         assert!(commits.is_empty());
@@ -881,7 +881,7 @@ mod tests {
                     if active {
                         let circle = circle.expect("hover handle");
                         assert_eq!(played.right(), circle.center.x);
-                        assert_eq!(circle.center.x, 5.0 + 490.0 * value);
+                        assert_eq!(circle.center.x, 6.0 + 488.0 * value);
                         assert!(circle.center.x - circle.radius >= 0.0);
                         assert!(circle.center.x + circle.radius <= 500.0);
                         let hit =

@@ -570,6 +570,9 @@ fn filmstrip_scrollbar_drag_keeps_columns_fixed_through_loading_and_release() {
         render(&mut strip, vec![pointer(grab, true)]);
         let moved = grab + egui::vec2(20.0, 0.0);
         render(&mut strip, vec![egui::Event::PointerMoved(moved)]);
+        for _ in 0..60 {
+            render(&mut strip, vec![]);
+        }
         let before = strip.scroll_offset;
         let width = strip.layout.extent(944.0);
         let anchor = strip.layout.nearest(before);
@@ -599,6 +602,9 @@ fn filmstrip_scrollbar_drag_keeps_columns_fixed_through_loading_and_release() {
             &mut strip,
             vec![egui::Event::PointerMoved(moved + egui::vec2(15.0, 0.0))],
         );
+        for _ in 0..60 {
+            render(&mut strip, vec![]);
+        }
         assert!(
             strip.scroll_offset > before + 20.0,
             "the bar remains responsive"
@@ -2222,16 +2228,16 @@ fn filmstrip_media_bounds_own_dimming_wheel_and_scrollbar_without_dragging_cards
     assert!(bounds.x0 >= f64::from(media.left() + 8.0));
     assert!(bounds.x1 <= f64::from(media.right() - 8.0));
     assert!(bounds.y1 <= f64::from(media.bottom() - 8.0));
-    assert!((bounds.height() - 5.0).abs() < 0.01);
+    assert!((bounds.height() - 32.0).abs() < 0.01);
     assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
         egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(191) && rect.rect == media
     )), "75% dim stays inside the media panel");
     assert!(
         output.shapes.iter().any(|shape| matches!(&shape.shape,
-            egui::Shape::Rect(rect) if rect.rect.top() > media.bottom() - 20.0
+            egui::Shape::Rect(rect) if rect.rect.top() > media.bottom() - 40.0
                 && rect.fill.a() > 0
                 && rect.rect.bottom() <= media.bottom() - 8.0
-                && rect.rect.width() > 20.0 && rect.rect.height() <= 5.0
+                && rect.rect.width() > 20.0 && rect.rect.height() > 20.0
         )),
         "visible scrollbar is inset from status/resize edges"
     );

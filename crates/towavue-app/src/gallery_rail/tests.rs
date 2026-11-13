@@ -351,9 +351,7 @@ fn clicks_interpolate_and_thumb_drag_preserves_grab_offset_with_retargeting() {
             .shapes
             .iter()
             .find_map(|shape| match &shape.shape {
-                egui::Shape::Rect(shape) if shape.fill == crate::chrome::SURFACE => {
-                    Some(shape.rect)
-                }
+                egui::Shape::Rect(shape) if shape.fill == thumb_color() => Some(shape.rect),
                 _ => None,
             })
             .expect("hover thumb");

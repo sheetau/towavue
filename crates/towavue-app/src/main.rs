@@ -1152,6 +1152,7 @@ struct Application<N> {
     folder_navigation_loop: bool,
     reuse_folder_tab: u16,
     tab_icons: bool,
+    filmstrip_grid: bool,
     graphics_epoch: u64,
     idle_graphics_frame: Option<(u64, u64)>,
     restored_reading_pages: bool,
@@ -1468,6 +1469,7 @@ where
             folder_navigation_loop: true,
             reuse_folder_tab: 0,
             tab_icons: true,
+            filmstrip_grid: true,
             graphics_epoch: 0,
             idle_graphics_frame: None,
             restored_reading_pages: false,
@@ -5832,6 +5834,7 @@ where
                             folder_loop: self.folder_navigation_loop && !self.reading_mode,
                             reuse_folder_tab: self.folder_tab_reuse_mode(),
                             tab_icons: show_tab_icons,
+                            filmstrip_grid: self.filmstrip_is_grid(),
                             nearest_images: self.nearest_images,
                             high_quality_minification: self.high_quality_minification,
                         },
@@ -8062,6 +8065,10 @@ where
             CommandId::AudioRepeatOff => self.set_audio_repeat(towavue_core::RepeatMode::Off),
             CommandId::AudioRepeatAll => self.set_audio_repeat(towavue_core::RepeatMode::All),
             CommandId::AudioRepeatOne => self.set_audio_repeat(towavue_core::RepeatMode::One),
+            CommandId::FilmstripGrid | CommandId::FilmstripRow => {
+                self.filmstrip_grid = command == CommandId::FilmstripGrid;
+                self.request_redraw();
+            }
             CommandId::ToggleTabIcons => {
                 self.tab_icons = !self.shows_tab_icons();
                 self.request_redraw();
@@ -11991,6 +11998,7 @@ where
         if changed || projection_changed {
             self.filmstrip.filter_changed();
         }
+        self.filmstrip.grid_mode = self.filmstrip_is_grid();
         self.filmstrip.show_with_header(
             context,
             body,
@@ -12088,7 +12096,7 @@ where
             && !stroke.modifiers.alt
             && !stroke.modifiers.logo
             && !stroke.modifiers.shift
-            && matches!(
+            && (matches!(
                 stroke.key,
                 Key::ArrowLeft
                     | Key::ArrowRight
@@ -12097,7 +12105,8 @@ where
                     | Key::PageUp
                     | Key::PageDown
                     | Key::Character('A' | 'D' | 'a' | 'd')
-            )
+            ) || (self.filmstrip_is_grid()
+                && matches!(stroke.key, Key::Character('W' | 'w' | 'S' | 's'))))
     }
 
     fn owns_tab_key(&self, stroke: &KeyStroke) -> bool {
@@ -21632,7 +21641,7 @@ mod tests {
             captured_at: std::time::SystemTime::now(),
         });
         for key in [
-            "A", "D", "Left", "Right", "Up", "Down", "PageUp", "PageDown",
+            "A", "D", "W", "S", "Left", "Right", "Up", "Down", "PageUp", "PageDown",
         ] {
             let stroke: KeyStroke = key.parse().expect("direction");
             assert!(app.filmstrip_owns_key(&stroke));

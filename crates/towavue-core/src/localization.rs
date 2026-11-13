@@ -89,6 +89,8 @@ pub const fn command_text(command: CommandId) -> Text {
         CommandId::PreviousSameKind => Text::CommandPreviousSameKind,
         CommandId::NextSameKind => Text::CommandNextSameKind,
         CommandId::ToggleFilmstrip => Text::CommandToggleFilmstrip,
+        CommandId::FilmstripGrid => Text::CommandFilmstripGrid,
+        CommandId::FilmstripRow => Text::CommandFilmstripRow,
         CommandId::ToggleCommandPalette => Text::CommandToggleCommandPalette,
         CommandId::OpenKeyboardSettings => Text::CommandOpenKeyboardSettings,
         CommandId::ReloadShortcuts => Text::CommandReloadShortcuts,

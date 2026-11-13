@@ -66,6 +66,7 @@ fn preference_restart_child() {
     if std::env::var("TOWAVUE_PREFERENCE_PHASE").expect("owned preference fixture") == "write" {
         assert!(!path.exists(), "startup does not write defaults");
         assert!(host.windows[&first].shows_tab_icons());
+        assert!(host.windows[&first].filmstrip_is_grid());
         let second = host
             .add_application(None)
             .expect("owned preference fixture");
@@ -89,6 +90,7 @@ fn preference_restart_child() {
             CommandId::ToggleReuseFolderTab,
             CommandId::ReuseFolderTabSameKind,
             CommandId::ToggleTabIcons,
+            CommandId::FilmstripRow,
             CommandId::ToggleReadingMode,
             CommandId::IncreaseReadingPages,
             CommandId::DecreaseReadingFirstPage,
@@ -126,6 +128,10 @@ fn preference_restart_child() {
         assert!(
             !app.shows_tab_icons(),
             "existing windows observe the shared choice"
+        );
+        assert!(
+            !app.filmstrip_is_grid(),
+            "existing windows share the layout choice"
         );
         app.dispatch(CommandId::CycleVolumeStep);
         assert_eq!(app.volume_step_percent, 5);
@@ -171,6 +177,10 @@ fn preference_restart_child() {
 }
 
 fn verify(app: &WindowApplication) {
+    assert!(
+        !app.filmstrip_is_grid(),
+        "single-row choice survives restart/new window"
+    );
     assert_eq!(app.view_resize_mode, view_resize::Mode::KeepScale);
     assert_eq!(app.volume_step_percent, 5);
     assert!(app.nearest_images);

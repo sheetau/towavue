@@ -9,6 +9,7 @@ pub(crate) struct Choices {
     pub audio_repeat: RepeatMode,
     pub folder_loop: bool,
     pub tab_icons: bool,
+    pub filmstrip_grid: bool,
     pub reuse_folder_tab: u16,
     pub nearest_images: bool,
     pub high_quality_minification: bool,
@@ -23,6 +24,7 @@ impl Default for Choices {
             audio_repeat: RepeatMode::Off,
             folder_loop: true,
             tab_icons: true,
+            filmstrip_grid: true,
             reuse_folder_tab: 0,
             nearest_images: false,
             high_quality_minification: true,
@@ -34,6 +36,13 @@ type Options = (Text, &'static [(CommandId, Text)]);
 
 pub(crate) fn options(command: CommandId) -> Option<Options> {
     Some(match command {
+        FilmstripGrid => (
+            Text::FilmstripLayout,
+            &[
+                (FilmstripGrid, Text::FilmstripGrid),
+                (FilmstripRow, Text::FilmstripRow),
+            ],
+        ),
         ResizeViewFit => (
             Text::ViewResizeBehavior,
             &[
@@ -187,6 +196,13 @@ pub(super) fn submenu(
             RepeatMode::All => AudioRepeatAll,
             RepeatMode::One => AudioRepeatOne,
         },
+        FilmstripGrid => {
+            if choices.filmstrip_grid {
+                FilmstripGrid
+            } else {
+                FilmstripRow
+            }
+        }
         FolderNavigationStop => {
             if choices.folder_loop {
                 FolderNavigationLoop

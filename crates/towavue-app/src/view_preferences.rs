@@ -68,6 +68,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         self.high_quality_minification = store.value(Key::Minification) != 0;
         self.folder_navigation_loop = store.value(Key::FolderLoop) != 0;
         self.tab_icons = store.value(Key::TabIcons) != 0;
+        self.filmstrip_grid = store.value(Key::FilmstripGrid) != 0;
         self.reuse_folder_tab = store.value(Key::ReuseFolderTab);
         let pages = store.value(Key::ReadingPages);
         self.reading_settings = ReadingSettings {
@@ -90,6 +91,14 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         };
         self.prefer_hardware_encode = store.value(Key::HardwareEncode) != 0;
         self.view_preferences = Some(store);
+    }
+
+    pub(super) fn filmstrip_is_grid(&self) -> bool {
+        self.view_preferences
+            .as_ref()
+            .map_or(self.filmstrip_grid, |store| {
+                store.value(Key::FilmstripGrid) != 0
+            })
     }
 
     pub(super) fn seed_tab_preferences(&mut self, id: TabId) {
@@ -159,6 +168,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 (Key::VolumeStep, u16::from(self.volume_step_percent))
             }
             ToggleTabIcons => (Key::TabIcons, u16::from(self.tab_icons)),
+            FilmstripGrid | FilmstripRow => (Key::FilmstripGrid, u16::from(self.filmstrip_grid)),
             ToggleReuseFolderTab
             | ReuseFolderTabOff
             | ReuseFolderTabAll

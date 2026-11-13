@@ -2,6 +2,10 @@ use crate::chrome;
 use crate::localization::{self, Language, Text};
 use towavue_core::localization::formatted;
 
+fn thumb_color() -> egui::Color32 {
+    egui::Color32::from_rgba_unmultiplied(0x1f, 0x1f, 0x1f, 148)
+}
+
 #[derive(Clone, Copy)]
 struct Position {
     layout: egui::Id,
@@ -11,6 +15,7 @@ struct Position {
 
 #[derive(Clone)]
 struct Motion {
+    axis: usize,
     layout: egui::Id,
     fraction: f32,
     target: f32,
@@ -34,7 +39,7 @@ pub(super) fn advance(context: &egui::Context, scroll_id: egui::Id) {
         return;
     };
     let mut state = egui::scroll_area::State::load(context, scroll_id).unwrap_or_default();
-    if (state.offset.y - motion.offset).abs() > 0.01 {
+    if (state.offset[motion.axis] - motion.offset).abs() > 0.01 {
         context.data_mut(|data| data.remove::<Motion>(id));
         return;
     }
@@ -53,7 +58,7 @@ pub(super) fn advance(context: &egui::Context, scroll_id: egui::Id) {
     motion.offset = offset_at(motion.maximum, motion.fraction);
     let moving = motion.fraction != motion.target;
     state = egui::scroll_area::State::default();
-    state.offset.y = motion.offset;
+    state.offset[motion.axis] = motion.offset;
     state.store(context, scroll_id);
     context.data_mut(|data| {
         data.insert_temp(
@@ -83,16 +88,15 @@ pub(super) struct Month {
 
 /// Filmstrip owns its keyboard/restore offset, but shares Gallery's rail motion.
 pub(super) fn advance_offset(context: &egui::Context, scroll_id: egui::Id) -> Option<f32> {
-    let moving = context
-        .data(|data| data.get_temp::<Motion>(scroll_id.with("rail-motion")))
-        .is_some();
+    let axis = context
+        .data(|data| data.get_temp::<Motion>(scroll_id.with("rail-motion")))?
+        .axis;
     advance(context, scroll_id);
-    moving.then(|| {
+    Some(
         egui::scroll_area::State::load(context, scroll_id)
             .unwrap_or_default()
-            .offset
-            .y
-    })
+            .offset[axis],
+    )
 }
 
 #[derive(Clone, Copy)]
@@ -103,6 +107,7 @@ struct FocusMarker {
 }
 
 /// Date-free rail: white is scroll position; long gray is focus and short gray is media.
+#[expect(clippy::too_many_arguments)]
 pub(super) fn show_positions<R>(
     ui: &mut egui::Ui,
     output: &mut egui::scroll_area::ScrollAreaOutput<R>,
@@ -111,38 +116,51 @@ pub(super) fn show_positions<R>(
     current: Option<usize>,
     selected: Option<usize>,
     snap: bool,
+    axis: usize,
 ) {
-    if count == 0 || rect.height() < 12.0 {
+    let cross = 1 - axis;
+    let point = |across: f32, along: f32| {
+        let mut point = egui::Pos2::ZERO;
+        point[cross] = across;
+        point[axis] = along;
+        point
+    };
+    if count == 0 || rect.size()[axis] < 12.0 {
         return;
     }
-    let maximum = (output.content_size.y - output.inner_rect.height()).max(0.0);
-    let layout = output.id.with((count, maximum.to_bits()));
-    let fraction = fraction_at(maximum, output.state.offset.y);
+    let maximum = (output.content_size[axis] - output.inner_rect.size()[axis]).max(0.0);
+    let layout = output.id.with((axis, count, maximum.to_bits()));
+    let fraction = fraction_at(maximum, output.state.offset[axis]);
     let motion_id = output.id.with("rail-motion");
     if ui
         .data(|data| data.get_temp::<Motion>(motion_id))
         .is_some_and(|motion| {
-            motion.layout != layout || (motion.offset - output.state.offset.y).abs() > 0.01
+            motion.layout != layout || (motion.offset - output.state.offset[axis]).abs() > 0.01
         })
     {
         ui.data_mut(|data| data.remove::<Motion>(motion_id));
     }
     let pixel = 1.0 / ui.ctx().pixels_per_point();
-    let height = (rect.height() * output.inner_rect.height() / output.content_size.y.max(1.0))
-        .clamp(pixel, rect.height());
-    let left = ((rect.left() + rect.width() * 0.075) / pixel).round() * pixel;
-    let right = ((rect.right() - rect.width() * 0.075) / pixel).round() * pixel;
-    ui.interact(rect, output.id.with(1_usize), egui::Sense::hover());
+    let height = (rect.size()[axis] * output.inner_rect.size()[axis]
+        / output.content_size[axis].max(1.0))
+    .clamp(pixel, rect.size()[axis]);
+    let left = ((rect.min[cross] + rect.size()[cross] * 0.075) / pixel).round() * pixel;
+    let right = ((rect.max[cross] - rect.size()[cross] * 0.075) / pixel).round() * pixel;
+    ui.interact(rect, output.id.with(axis), egui::Sense::hover());
     let response = ui.interact(
         rect,
         output.id.with("position-rail"),
         egui::Sense::click_and_drag(),
     );
+    response.widget_info(|| egui::WidgetInfo::new(egui::WidgetType::ScrollBar));
     let thumb = egui::Rect::from_min_max(
-        egui::pos2(left, rect.top() + fraction * (rect.height() - height)),
-        egui::pos2(
+        point(
+            left,
+            rect.min[axis] + fraction * (rect.size()[axis] - height),
+        ),
+        point(
             right,
-            rect.top() + fraction * (rect.height() - height) + height,
+            rect.min[axis] + fraction * (rect.size()[axis] - height) + height,
         ),
     );
     let mut target = None;
@@ -152,7 +170,7 @@ pub(super) fn show_positions<R>(
         || response.drag_stopped())
         && let Some(point) = response.interact_pointer_pos()
     {
-        target = Some(((point.y - rect.top()) / rect.height()).clamp(0.0, 1.0));
+        target = Some(((point[axis] - rect.min[axis]) / rect.size()[axis]).clamp(0.0, 1.0));
     }
     let handle = ui.interact(
         thumb,
@@ -166,13 +184,14 @@ pub(super) fn show_positions<R>(
         if let Some(point) = handle.interact_pointer_pos() {
             let anchor = ui.data_mut(|data| {
                 *data.get_temp_mut_or_insert_with(anchor_id, || DragAnchor {
-                    pointer: point.y,
+                    pointer: point[axis],
                     fraction,
                 })
             });
             target = Some(
-                (anchor.fraction + (point.y - anchor.pointer) / (rect.height() - height).max(1.0))
-                    .clamp(0.0, 1.0),
+                (anchor.fraction
+                    + (point[axis] - anchor.pointer) / (rect.size()[axis] - height).max(1.0))
+                .clamp(0.0, 1.0),
             );
         }
     } else {
@@ -183,10 +202,11 @@ pub(super) fn show_positions<R>(
         let mut motion = ui
             .data(|data| data.get_temp::<Motion>(motion_id))
             .unwrap_or(Motion {
+                axis,
                 layout,
                 fraction,
                 target,
-                offset: output.state.offset.y,
+                offset: output.state.offset[axis],
                 maximum,
                 time: now,
                 pass: ui.ctx().cumulative_pass_nr(),
@@ -197,19 +217,16 @@ pub(super) fn show_positions<R>(
         ui.ctx().request_repaint();
     }
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
-    painter.rect_filled(
-        thumb,
-        0.0,
-        egui::Color32::from_rgba_unmultiplied(0x1f, 0x1f, 0x1f, 148),
-    );
+    painter.rect_filled(thumb, 0.0, thumb_color());
     let line = |left: f32, fraction: f32, color| {
-        let y = (((rect.top() + fraction * rect.height() - pixel * 0.5) / pixel).round() * pixel)
+        let y = (((rect.min[axis] + fraction * rect.size()[axis] - pixel * 0.5) / pixel).round()
+            * pixel)
             .clamp(
-                (rect.top() / pixel).ceil() * pixel,
-                (rect.bottom() / pixel).floor() * pixel - pixel,
+                (rect.min[axis] / pixel).ceil() * pixel,
+                (rect.max[axis] / pixel).floor() * pixel - pixel,
             );
         painter.rect_filled(
-            egui::Rect::from_min_max(egui::pos2(left, y), egui::pos2(right, y + pixel)),
+            egui::Rect::from_min_max(point(left, y), point(right, y + pixel)),
             0.0,
             color,
         );
@@ -233,7 +250,7 @@ pub(super) fn show_positions<R>(
         let dt = (now - marker.time).clamp(0.0, 1.0 / 30.0) as f32;
         marker.time = now;
         marker.position += (target - marker.position) * (1.0 - (-dt / 0.055).exp());
-        if (target - marker.position).abs() * rect.height() < pixel * 0.5 {
+        if (target - marker.position).abs() * rect.size()[axis] < pixel * 0.5 {
             marker.position = target;
         } else {
             ui.ctx().request_repaint();
@@ -471,7 +488,7 @@ pub(super) fn show(
     if opacity > 0.0 {
         painter.set(
             thumb_background,
-            egui::Shape::rect_filled(thumb, 0.0, crate::chrome::SURFACE.gamma_multiply(opacity)),
+            egui::Shape::rect_filled(thumb, 0.0, thumb_color().gamma_multiply(opacity)),
         );
     }
     if let Some(target) = target.filter(|_| ui.is_enabled()) {
@@ -479,6 +496,7 @@ pub(super) fn show(
         let mut motion = ui
             .data(|data| data.get_temp::<Motion>(motion_id))
             .unwrap_or_else(|| Motion {
+                axis: 1,
                 layout,
                 fraction,
                 target,

@@ -201,6 +201,7 @@ const MENUS: &[(Text, &[&[CommandId]])] = &[
             ],
             &[
                 ToggleFilmstrip,
+                FilmstripGrid,
                 FocusSearch,
                 ToggleTimeline,
                 ToggleCommandPalette,

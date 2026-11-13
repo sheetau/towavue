@@ -26,7 +26,8 @@ pub(super) struct Step {
 pub(crate) fn group(command: CommandId) -> bool {
     matches!(
         command,
-        CommandId::ToggleReuseFolderTab
+        CommandId::FilmstripGrid
+            | CommandId::ToggleReuseFolderTab
             | CommandId::CycleVolumeStep
             | CommandId::CycleAudioRepeat
             | CommandId::ResizeViewFit
@@ -39,7 +40,8 @@ pub(crate) fn group(command: CommandId) -> bool {
 pub(super) fn child(command: CommandId) -> bool {
     matches!(
         command,
-        CommandId::ReuseFolderTabOff
+        CommandId::FilmstripRow
+            | CommandId::ReuseFolderTabOff
             | CommandId::ReuseFolderTabAll
             | CommandId::ReuseFolderTabSameKind
             | CommandId::VolumeStepTwo
@@ -58,6 +60,7 @@ pub(super) fn child(command: CommandId) -> bool {
 pub(super) fn title(command: CommandId, language: localization::Language) -> Option<&'static str> {
     Some(
         match command {
+            CommandId::FilmstripGrid => Text::FilmstripLayout,
             CommandId::ToggleReuseFolderTab => Text::CommandToggleReuseFolderTab,
             CommandId::CycleVolumeStep => Text::ListeningVolumeStep,
             CommandId::CycleAudioRepeat => Text::AudioRepeat,
@@ -223,6 +226,13 @@ impl<N: Fn(crate::AppEvent) + Send + Sync + 'static> crate::Application<N> {
         let mut rows = Vec::new();
         if let Some((_, options)) = crate::menu::choices::options(command) {
             let selected = match command {
+                FilmstripGrid => {
+                    if self.filmstrip_is_grid() {
+                        FilmstripGrid
+                    } else {
+                        FilmstripRow
+                    }
+                }
                 CycleVolumeStep => match self.volume_step_percent {
                     5 => VolumeStepFive,
                     10 => VolumeStepTen,
@@ -327,6 +337,28 @@ impl<N: Fn(crate::AppEvent) + Send + Sync + 'static> crate::Application<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn filmstrip_layout_options_dispatch_without_shortcut_or_media() {
+        let mut app = crate::Application::new(None, |_| {}).expect("app");
+        for (command, grid) in [
+            (CommandId::FilmstripGrid, true),
+            (CommandId::FilmstripRow, false),
+        ] {
+            app.dispatch(command);
+            assert_eq!(app.filmstrip_is_grid(), grid);
+            assert!(app.begin_palette_options(CommandId::FilmstripGrid));
+            let step = app.palette.step.as_ref().expect("layout choices");
+            assert_eq!(step.rows.len(), 2);
+            let selected = step
+                .rows
+                .iter()
+                .filter(|row| row.current)
+                .collect::<Vec<_>>();
+            assert_eq!(selected.len(), 1);
+            assert_eq!(selected[0].value, Value::Command(command));
+        }
+    }
 
     fn key(key: egui::Key) -> egui::Event {
         egui::Event::Key {

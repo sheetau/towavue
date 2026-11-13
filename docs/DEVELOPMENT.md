@@ -54,7 +54,7 @@ The Release app is a GUI executable and does not open a console. Session warning
 
 ## Verification by impact
 
-Filmstrip grid changes use `filmstrip::grid_tests::`, `gallery_rail::positions_tests::` and the native-host Filmstrip shortcut guard test, plus `ui_reference_tests::media_reference_layouts_reach_the_gpu` for generated full-client readbacks. The explicitly named `show_legacy_horizontal` fixtures retain comparison coverage of shared interaction code; they are not evidence of the production grid geometry. Review the grid at 100/125/200% density, narrow windows, offscreen keyboard targets, tab restores, marker coincidence and rail dragging.
+Filmstrip grid changes use `filmstrip::grid_tests::`, `gallery_rail::positions_tests::` and the native-host Filmstrip shortcut guard test, plus `ui_reference_tests::media_reference_layouts_reach_the_gpu` for generated full-client readbacks. The explicitly named `show_legacy_horizontal` fixtures retain the original single-row geometry and transfer coverage. The production layout choice uses the same rendering path. Check both orientations, mode changes with a retained selection/tab, grid W/S and thumbnail swipes, and shared horizontal/vertical rail input. Menu/palette choices and the owned preference restart control cover selection and persistence. Review the grid at 100/125/200% density, narrow windows, offscreen keyboard targets, tab restores, marker coincidence and rail dragging.
 
 
 Shared style changes use `chrome::visual_contract_tests::`, `palette::row::tests::`,

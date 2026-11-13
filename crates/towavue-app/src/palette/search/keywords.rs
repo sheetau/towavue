@@ -48,6 +48,12 @@ pub(super) fn phrases(command: CommandId) -> &'static str {
         NextMedia => "next file|next item|skip file|次のファイル",
         PreviousSameKind => "previous same type|前の同じ種類",
         NextSameKind => "next same type|次の同じ種類",
+        FilmstripGrid => {
+            "filmstrip layout grid columns rows horizontal single row|フィルムストリップ グリッド 格子 横 一列 配置"
+        }
+        FilmstripRow => {
+            "filmstrip layout horizontal single row strip|フィルムストリップ 横 一列 配置"
+        }
         ToggleFilmstrip => "thumbnails|thumbnail strip|folder overview|サムネイル|一覧",
         ToggleCommandPalette => "commands|actions|コマンド検索|操作検索",
         OpenKeyboardSettings => {

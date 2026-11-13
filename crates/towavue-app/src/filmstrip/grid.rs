@@ -35,12 +35,18 @@ impl Grid {
         self.cell + ROW_GAP
     }
 
+    pub fn padding(self) -> f32 {
+        (self.viewport - self.cell).max(0.0) * 0.5
+    }
+
     pub fn height(self, count: usize) -> f32 {
-        ROW_GAP + count.div_ceil(self.columns) as f32 * self.pitch() + 16.0
+        2.0 * self.padding()
+            + self.cell
+            + count.div_ceil(self.columns).saturating_sub(1) as f32 * self.pitch()
     }
 
     pub fn offset(self, index: usize, count: usize) -> f32 {
-        (ROW_GAP + (index / self.columns) as f32 * self.pitch() + self.cell * 0.5
+        (self.padding() + (index / self.columns) as f32 * self.pitch() + self.cell * 0.5
             - self.viewport * 0.5)
             .clamp(0.0, (self.height(count) - self.viewport).max(0.0))
     }
@@ -50,7 +56,7 @@ impl Grid {
             origin
                 + egui::vec2(
                     self.left + (index % self.columns) as f32 * (self.cell + layout::GAP),
-                    ROW_GAP + (index / self.columns) as f32 * self.pitch(),
+                    self.padding() + (index / self.columns) as f32 * self.pitch(),
                 ),
             Vec2::splat(self.cell),
         );
@@ -59,10 +65,10 @@ impl Grid {
 
     pub fn visible(self, viewport: Rect, count: usize) -> Range<usize> {
         // Include the caption band even when its thumbnail is just above view.
-        let first = ((viewport.top() - ROW_GAP - 90.0) / self.pitch())
+        let first = ((viewport.top() - self.padding() - 90.0) / self.pitch())
             .floor()
             .max(0.0) as usize;
-        let last = ((viewport.bottom() - ROW_GAP) / self.pitch())
+        let last = ((viewport.bottom() - self.padding()) / self.pitch())
             .ceil()
             .max(0.0) as usize
             + 1;

@@ -100,7 +100,7 @@ fn grid_keeps_filmstrip_spacing_and_keyboard_target_through_scroll_and_tab_resto
         let first = card(&strip, 0);
         assert!((first.size().length() - layout::DIAMETER).abs() < 0.001);
         assert!((first.center().x - 220.0).abs() < 0.001);
-        assert!((first.center().y - 168.0).abs() < 0.001);
+        assert!((first.center().y - 288.0).abs() < 0.001);
         frame(
             &mut strip,
             &context,
@@ -115,9 +115,24 @@ fn grid_keeps_filmstrip_spacing_and_keyboard_target_through_scroll_and_tab_resto
             &context,
             &snapshot,
             0.6,
-            vec![key(egui::Key::ArrowDown)],
+            vec![key(egui::Key::S)],
         );
         assert_eq!(strip.selection.as_ref(), Some(&snapshot.items[5].path));
+        frame(
+            &mut strip,
+            &context,
+            &snapshot,
+            0.61,
+            vec![key(egui::Key::W)],
+        );
+        assert_eq!(strip.selection.as_ref(), Some(&snapshot.items[0].path));
+        frame(
+            &mut strip,
+            &context,
+            &snapshot,
+            0.615,
+            vec![key(egui::Key::ArrowDown)],
+        );
         let actions = frame(
             &mut strip,
             &context,
@@ -182,6 +197,96 @@ fn grid_keeps_filmstrip_spacing_and_keyboard_target_through_scroll_and_tab_resto
             );
         }
         assert_eq!(strip.scroll_offset, 0.0);
+        // A drag starting on a grid thumbnail scrolls without tab/window transfer.
+        let start = card(&strip, 0).center();
+        let end = start - egui::vec2(0.0, 100.0);
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(
+            &mut strip,
+            &context,
+            &snapshot,
+            3.0,
+            vec![egui::Event::PointerMoved(start)],
+        );
+        frame(
+            &mut strip,
+            &context,
+            &snapshot,
+            3.02,
+            vec![button(start, true)],
+        );
+        let dragged = frame(
+            &mut strip,
+            &context,
+            &snapshot,
+            3.04,
+            vec![egui::Event::PointerMoved(end)],
+        );
+        let released = frame(
+            &mut strip,
+            &context,
+            &snapshot,
+            3.06,
+            vec![button(end, false)],
+        );
+        assert!(
+            dragged.0.is_empty() && released.0.is_empty(),
+            "grid swipe must not open or transfer media"
+        );
+        assert!(strip.scroll_offset > 0.0, "thumbnail swipe scrolls");
+        assert!(
+            strip
+                .active_drag(&context, Some(&snapshot.items[0].path))
+                .is_none()
+        );
+        let target = card(&strip, 0).center();
+        let mut click = vec![egui::Event::PointerMoved(target)];
+        for pressed in [true, false] {
+            click.push(egui::Event::PointerButton {
+                pos: target,
+                button: egui::PointerButton::Middle,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        let opened = frame(&mut strip, &context, &snapshot, 3.12, click);
+        assert!(opened.0.iter().any(|a| matches!(a, UiAction::OpenFilmstripMedia(path, true) if path == &snapshot.items[0].path)), "grid middle-click retains background-tab opening");
+        // Both orientations preserve focused identity, and old tab offsets are
+        // translated when a global layout change happened while the tab was away.
+        frame(
+            &mut strip,
+            &context,
+            &snapshot,
+            3.2,
+            vec![key(egui::Key::S)],
+        );
+        let selected = strip.selection.clone();
+        let saved = strip.take_view();
+        strip.grid_mode = false;
+        strip.restore_view(saved);
+        let (_, horizontal) = frame(&mut strip, &context, &snapshot, 3.3, vec![]);
+        assert_eq!(strip.selection, selected);
+        assert!(strip.layout.grid.is_none());
+        let index = strip
+            .layout
+            .index(selected.as_deref().expect("selection"))
+            .expect("index");
+        assert_eq!(strip.scroll_offset, strip.layout.center_offset(index));
+        // read_response outside the pass may retain the preceding hit-test rect.
+        frame(&mut strip, &context, &snapshot, 3.31, vec![]);
+        assert!((card(&strip, index).center().x - 480.0).abs() < 1.0);
+        assert!(horizontal.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == crate::chrome::FOREGROUND && r.rect.bottom() > 530.0 && r.rect.height() > 20.0 && r.rect.width() < 2.0)), "horizontal position rail");
+        strip.grid_mode = true;
+        frame(&mut strip, &context, &snapshot, 3.4, vec![]);
+        assert_eq!(strip.scroll_offset, strip.layout.center_offset(index));
+        frame(&mut strip, &context, &snapshot, 3.41, vec![]);
+        assert_eq!(strip.selection, selected);
+        assert!((card(&strip, index).center().y - 288.0).abs() < 1.0);
     }
 }
 
@@ -190,6 +295,15 @@ fn grid_cells_keep_fixed_pitch_and_wide_caption_gaps() {
     for width in [220.0, 480.0, 960.0, 3840.0, 100_000.0] {
         let screen = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 720.0));
         let grid = grid::Grid::new(screen, screen.shrink(8.0));
+        let count = 97;
+        for index in [0, count - 1] {
+            let offset = grid.offset(index, count);
+            let rect = grid.rect(index, egui::pos2(0.0, -offset), Vec2::splat(1.0));
+            assert!(
+                (rect.center().y - grid.viewport * 0.5).abs() < 0.01,
+                "end row centers in viewport"
+            );
+        }
         let available = (width - 2.0 * gallery_side_inset(width)).max(1.0);
         assert_eq!(grid.cell, layout::DIAMETER.min(available));
         if grid.columns > 1 {

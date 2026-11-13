@@ -2,11 +2,22 @@ use super::*;
 
 #[test]
 fn document_markers_are_independent_of_hover_and_the_viewport_thumb_eases() {
-    for density in [1.0, 1.25, 2.0] {
+    for (density, axis) in [1.0, 1.25, 2.0]
+        .into_iter()
+        .flat_map(|density| [(density, 0), (density, 1)])
+    {
+        let cross = 1 - axis;
+        let point = |x, y| {
+            if axis == 1 {
+                egui::pos2(x, y)
+            } else {
+                egui::pos2(y, x)
+            }
+        };
         let context = crate::fonts::test_context();
         context.set_pixels_per_point(density);
         context.global_style_mut(chrome::style);
-        let rail = egui::Rect::from_min_max(egui::pos2(600.0, 40.0), egui::pos2(632.0, 360.0));
+        let rail = egui::Rect::from_min_max(point(600.0, 40.0), point(632.0, 360.0));
         let mut clock = 0.0;
         let mut frame = |selected, snap, events| {
             clock += 1.0 / 60.0;
@@ -17,7 +28,7 @@ fn document_markers_are_independent_of_hover_and_the_viewport_thumb_eases() {
                     events,
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
-                        egui::vec2(640.0, 400.0),
+                        point(640.0, 400.0).to_vec2(),
                     )),
                     ..Default::default()
                 },
@@ -25,15 +36,29 @@ fn document_markers_are_independent_of_hover_and_the_viewport_thumb_eases() {
                     ui.add_space(40.0);
                     let id = ui.make_persistent_id(egui::IdSalt::new("positions"));
                     advance(&context, id);
-                    let mut output = egui::ScrollArea::vertical()
+                    let mut output = egui::ScrollArea::new([axis == 0, axis == 1])
                         .id_salt("positions")
                         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                         .max_height(320.0)
+                        .max_width(320.0)
                         .show(ui, |ui| {
-                            ui.set_min_height(2400.0);
+                            if axis == 1 {
+                                ui.set_min_height(2400.0);
+                            } else {
+                                ui.set_min_width(2400.0);
+                            }
                         });
-                    show_positions(ui, &mut output, rail, 11, Some(3), Some(selected), snap);
-                    offset = output.state.offset.y;
+                    show_positions(
+                        ui,
+                        &mut output,
+                        rail,
+                        11,
+                        Some(3),
+                        Some(selected),
+                        snap,
+                        axis,
+                    );
+                    offset = output.state.offset[axis];
                 },
             );
             (output, offset)
@@ -62,12 +87,12 @@ fn document_markers_are_independent_of_hover_and_the_viewport_thumb_eases() {
         let white = lines(&output, chrome::FOREGROUND);
         assert_eq!(gray.len(), 2);
         assert_eq!(white.len(), 1);
-        assert!(gray[1].top() > original.top());
-        assert!(gray[1].top() < rail.top() + rail.height() * 0.7);
-        assert!(gray[0].width() < gray[1].width());
-        assert_eq!(white[0].top(), rail.top());
-        assert!((white[0].height() - 1.0 / density).abs() < 0.0001);
-        let point = egui::pos2(616.0, 328.0);
+        assert!(gray[1].min[axis] > original.min[axis]);
+        assert!(gray[1].min[axis] < rail.min[axis] + rail.size()[axis] * 0.7);
+        assert!(gray[0].size()[cross] < gray[1].size()[cross]);
+        assert_eq!(white[0].min[axis], rail.min[axis]);
+        assert!((white[0].size()[axis] - 1.0 / density).abs() < 0.0001);
+        let point = point(616.0, 328.0);
         let (output, _) = frame(7, false, vec![egui::Event::PointerMoved(point)]);
         assert_eq!(
             lines(&output, chrome::MUTED).len(),
@@ -77,7 +102,9 @@ fn document_markers_are_independent_of_hover_and_the_viewport_thumb_eases() {
         assert_eq!(lines(&output, chrome::MUTED)[0], gray[0]);
         let (output, _) = frame(7, true, vec![]);
         let snapped = lines(&output, chrome::MUTED)[1];
-        assert!((snapped.top() - (rail.top() + rail.height() * 0.7)).abs() <= 1.0 / density);
+        assert!(
+            (snapped.min[axis] - (rail.min[axis] + rail.size()[axis] * 0.7)).abs() <= 1.0 / density
+        );
         let button = |pressed| egui::Event::PointerButton {
             pos: point,
             button: egui::PointerButton::Primary,

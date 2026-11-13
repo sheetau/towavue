@@ -75,6 +75,7 @@ fn media_reference_layouts_reach_the_gpu() {
                     "image-options",
                     "image-languages",
                     "image-filmstrip",
+                    "image-filmstrip-row",
                     "image-filmstrip-search",
                     "image-gallery",
                     "image-gallery-search",
@@ -121,6 +122,7 @@ fn media_reference_layouts_reach_the_gpu() {
                     }
                     if scene.starts_with("image-filmstrip") {
                         app.filmstrip_open = true;
+                        app.filmstrip_grid = scene != "image-filmstrip-row";
                     } else if scene.starts_with("image-gallery") {
                         app.recent_paths = app
                             .folder_snapshot

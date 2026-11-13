@@ -126,6 +126,7 @@ mod duration_tests;
 
 #[derive(Default)]
 pub struct View {
+    grid: bool,
     focus: Option<PathBuf>,
     selection: Option<PathBuf>,
     offset: f32,
@@ -157,6 +158,8 @@ impl RecentGrid {
 }
 
 pub struct Filmstrip {
+    pub(crate) grid_mode: bool,
+    restored_grid: Option<bool>,
     pub(crate) menu_owner: Option<crate::thumbnail_menu::Owner>,
     loader: PreviewLoader,
     generation: u64,
@@ -262,6 +265,8 @@ impl Filmstrip {
             wheel_reset_frame: None,
             restore_scroll: false,
             layout: layout::Layout::default(),
+            grid_mode: true,
+            restored_grid: None,
             drag: drag::State::default(),
             recent_drag: drag::State::default(),
             swipe: swipe::State::default(),
@@ -490,6 +495,7 @@ impl Filmstrip {
             self.layout.center_offset(target)
         });
         let view = View {
+            grid: self.layout.grid.is_some(),
             focus: self.focus.take(),
             selection: self.selection.take(),
             offset,
@@ -508,6 +514,7 @@ impl Filmstrip {
         self.card_paths.clear();
         self.scroll_offset = view.offset;
         self.restore_scroll = true;
+        self.restored_grid = Some(view.grid);
     }
 
     pub fn focus_current(&mut self) {
@@ -854,7 +861,7 @@ impl Filmstrip {
             actions,
             header_height,
             backdrop,
-            true,
+            self.grid_mode,
         );
     }
 
@@ -899,9 +906,17 @@ impl Filmstrip {
                     .filter(|index| index / old.columns == nearest / old.columns)
                     .unwrap_or(nearest)
             });
+        let reflow_anchor = if self.layout.grid.is_some() != grid {
+            self.selection
+                .as_deref()
+                .and_then(|path| self.layout.index(path))
+        } else {
+            reflow_anchor
+        };
         self.layout.grid = geometry;
         let columns = self.layout.grid.map_or(1, |grid| grid.columns);
-        self.drag.begin(context, snapshot, current, screen, enabled);
+        self.drag
+            .begin(context, snapshot, current, screen, enabled && !grid);
         let pointer = context.input(|input| input.pointer.hover_pos());
         let pointer_moved = self.window_focused
             && pointer != self.pointer_position
@@ -942,6 +957,10 @@ impl Filmstrip {
         });
         self.selection =
             selection.and_then(|index| snapshot.map(|folder| folder.items[index].path.clone()));
+        if self.restore_scroll && self.restored_grid.is_some_and(|saved| saved != grid) {
+            self.scroll_offset = self.layout.center_offset(selection.unwrap_or(0));
+            self.indicator = Default::default();
+        }
         if recenter {
             self.indicator = Default::default();
         }
@@ -1001,6 +1020,8 @@ impl Filmstrip {
                                     egui::Key::ArrowDown,
                                     egui::Key::A,
                                     egui::Key::D,
+                                    egui::Key::W,
+                                    egui::Key::S,
                                 ]
                                 .iter()
                                 .any(|key| input.key_pressed(*key))
@@ -1046,8 +1067,17 @@ impl Filmstrip {
                                     | egui::Key::ArrowDown
                                     | egui::Key::A
                                     | egui::Key::D
+                                    | egui::Key::W
+                                    | egui::Key::S
                             ))
-                            && (grid || !matches!(key, egui::Key::ArrowUp | egui::Key::ArrowDown))
+                            && (grid
+                                || !matches!(
+                                    key,
+                                    egui::Key::ArrowUp
+                                        | egui::Key::ArrowDown
+                                        | egui::Key::W
+                                        | egui::Key::S
+                                ))
                             && (*modifiers == egui::Modifiers::NONE
                                 || (*key == egui::Key::Tab && *modifiers == egui::Modifiers::SHIFT))
                         {
@@ -1055,8 +1085,12 @@ impl Filmstrip {
                                 egui::Key::Tab if modifiers.shift => (target + count - 1) % count,
                                 egui::Key::Tab => (target + 1) % count,
                                 egui::Key::A | egui::Key::ArrowLeft => target.saturating_sub(1),
-                                egui::Key::ArrowUp if grid => target.saturating_sub(columns),
-                                egui::Key::ArrowDown if grid => (target + columns).min(count - 1),
+                                egui::Key::W | egui::Key::ArrowUp if grid => {
+                                    target.saturating_sub(columns)
+                                }
+                                egui::Key::S | egui::Key::ArrowDown if grid => {
+                                    (target + columns).min(count - 1)
+                                }
                                 _ => (target + 1).min(count - 1),
                             };
                             changed = true;
@@ -1281,10 +1315,17 @@ impl Filmstrip {
                 }
                 ui.style_mut().always_scroll_the_only_direction = true;
                 ui.spacing_mut().scroll.bar_width = 5.0;
-                let rail = Rect::from_min_max(
-                    egui::pos2(padding.right() - 32.0, padding.top()),
-                    egui::pos2(padding.right(), padding.bottom()),
-                );
+                let rail = if grid {
+                    Rect::from_min_max(
+                        egui::pos2(padding.right() - 32.0, padding.top()),
+                        padding.max,
+                    )
+                } else {
+                    Rect::from_min_max(
+                        egui::pos2(padding.left(), padding.bottom() - 32.0),
+                        padding.max,
+                    )
+                };
                 // Keep wheel ownership across the full dimmed panel, including
                 // the gutter outside the inset scroll area's hit regions.
                 let gutter_scroll = if wheel_enabled
@@ -1329,9 +1370,9 @@ impl Filmstrip {
                 let mut scroll_ui = ui.new_child(egui::UiBuilder::new().max_rect(inset));
                 let ui = &mut scroll_ui;
                 let scroll_id = ui.make_persistent_id(egui::IdSalt::new("filmstrip-scroll"));
-                if grid
-                    && !snap
+                if !snap
                     && !restore
+                    && reflow.is_none()
                     && self.scroll_target.is_none()
                     && self.page_target.is_none()
                     && let Some(offset) = crate::gallery_rail::advance_offset(context, scroll_id)
@@ -1365,11 +1406,7 @@ impl Filmstrip {
                     ..Default::default()
                 })
                 // The fixed card geometry determines overflow before the first sizing pass.
-                .scroll_bar_visibility(if !grid && content_extent > inset.width() {
-                    egui::scroll_area::ScrollBarVisibility::AlwaysVisible
-                } else {
-                    egui::scroll_area::ScrollBarVisibility::AlwaysHidden
-                })
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                 .scroll_offset(if grid {
                     egui::vec2(0.0, self.scroll_offset - gutter_scroll)
                 } else {
@@ -1419,8 +1456,13 @@ impl Filmstrip {
                             .floor()
                             .clamp(1.0, 4.0) as usize
                     };
-                    let center_y = (origin.y + viewport.height() * 0.5 - header_height * 0.5).min(
+                    let caption_bottom = if grid {
                         ui.clip_rect().bottom()
+                    } else {
+                        rail.top() - 4.0
+                    };
+                    let center_y = (origin.y + viewport.height() * 0.5 - header_height * 0.5).min(
+                        caption_bottom
                             - layout::DIAMETER * 0.5
                             - indicator::GAP
                             - indicator::TEXT_GAP
@@ -1498,7 +1540,7 @@ impl Filmstrip {
                             .interact(
                                 rect,
                                 ui.id().with(("filmstrip-item", &item.path)),
-                                if deleted {
+                                if deleted || grid {
                                     egui::Sense::click()
                                 } else {
                                     egui::Sense::click_and_drag()
@@ -1508,18 +1550,10 @@ impl Filmstrip {
                         self.card_paths
                             .push((response.id, item.path.clone(), index));
                         let active = selected == Some(index);
-                        if !deleted {
+                        if !deleted && !grid {
                             let mut drag_response = response.clone();
                             drag_response.rect = presented_rect;
-                            if grid {
-                                self.drag.observe_recent(
-                                    &drag_response,
-                                    &item.path,
-                                    presented_rect,
-                                );
-                            } else {
-                                self.drag.observe(&drag_response, &item.path);
-                            }
+                            self.drag.observe(&drag_response, &item.path);
                         }
                         if focus_target == Some(index)
                             && response.enabled()
@@ -1671,7 +1705,7 @@ impl Filmstrip {
                         }
                     }
                 });
-                if grid {
+                {
                     let selection = self
                         .selection
                         .as_deref()
@@ -1684,6 +1718,7 @@ impl Filmstrip {
                         selected,
                         selection,
                         snap || restore || reflow.is_some() || tab_traversal,
+                        usize::from(grid),
                     );
                 }
                 self.scroll_offset = if grid {
@@ -1692,17 +1727,18 @@ impl Filmstrip {
                     output.state.offset.x
                 };
                 self.restore_scroll = false;
+                self.restored_grid = None;
                 self.swipe.exclusions.clear();
-                self.swipe
-                    .exclusions
-                    .extend(self.card_paths.iter().filter_map(|(id, _, _)| {
-                        context
-                            .read_response(*id)
-                            .map(|response| response.interact_rect)
-                    }));
-                if grid {
-                    self.swipe.exclusions.push(rail);
+                if !grid {
+                    self.swipe
+                        .exclusions
+                        .extend(self.card_paths.iter().filter_map(|(id, _, _)| {
+                            context
+                                .read_response(*id)
+                                .map(|response| response.interact_rect)
+                        }));
                 }
+                self.swipe.exclusions.push(rail);
                 if let Some(bar) = context.read_response(output.id.with(0usize)) {
                     self.swipe.exclusions.push(bar.interact_rect);
                 }

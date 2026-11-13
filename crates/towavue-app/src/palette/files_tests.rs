@@ -125,15 +125,13 @@ fn recent_file_icons_follow_the_setting_without_changing_folder_or_command_rows(
                         < 1.0,
                     "icon shares the ordinary label inset"
                 );
-                let format = text.galley.job.sections[0].format.color;
-                let color =
-                    text.override_text_color
-                        .unwrap_or(if format == egui::Color32::PLACEHOLDER {
-                            text.fallback_color
-                        } else {
-                            format
-                        });
-                assert!(icon.vertices.iter().all(|vertex| vertex.color == color));
+                let color = egui::Color32::from_rgb(0x14, 0x7e, 0xff);
+                let color = color.gamma_multiply(f32::from(icon.vertices[0].color.a()) / 255.0);
+                assert!(
+                    icon.vertices.iter().all(|vertex| vertex.color == color),
+                    "icon colors: {:?}, expected {color:?}",
+                    icon.vertices
+                );
             }
         }
     }

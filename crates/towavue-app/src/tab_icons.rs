@@ -1,3 +1,5 @@
+mod media;
+
 use crate::fluent::Kind;
 use egui::{Color32, Context, Rect, Response, Ui};
 use std::path::Path;
@@ -34,6 +36,9 @@ pub(super) fn title_color(ui: &Ui, response: &Response, active: bool) -> Color32
 }
 
 pub(super) fn paint(ui: &Ui, rect: Rect, kind: Kind, color: Color32) {
+    if media::paint(ui, rect, kind, color.a()) {
+        return;
+    }
     crate::fluent::paint(
         ui,
         Rect::from_center_size(rect.center(), egui::Vec2::splat(16.0)),
@@ -57,7 +62,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn decoration_shares_title_hit_target_and_text_color() {
+    fn decoration_keeps_title_hit_target_and_media_color() {
         for density in [1.0, 1.25, 2.0] {
             for active in [false, true] {
                 let context = crate::fonts::test_context();
@@ -114,19 +119,7 @@ mod tests {
                         _ => None,
                     })
                     .expect("icon");
-                let title = output
-                    .shapes
-                    .iter()
-                    .find_map(|shape| match &shape.shape {
-                        egui::Shape::Text(text) if text.galley.text() == "Photo" => Some(text),
-                        _ => None,
-                    })
-                    .expect("title");
-                let color = if active {
-                    crate::chrome::FOREGROUND
-                } else {
-                    title.fallback_color
-                };
+                let color = media::color(Kind::Image).expect("media color");
                 assert!(icon.vertices.iter().all(|vertex| vertex.color == color));
                 assert_eq!(icon.calc_bounds().width(), 16.0);
             }

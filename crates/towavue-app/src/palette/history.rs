@@ -45,7 +45,7 @@ impl CommandPalette {
             .show_popup_styled(ui, crate::chrome::PADDING as f32, |ui| {
                 ui.spacing_mut().item_spacing.y = crate::chrome::ITEM_GAP;
                 if matches.is_empty() {
-                    ui.weak(text(ui.ctx(), Text::NoMatchingCommands));
+                    row::heading(ui, text(ui.ctx(), Text::NoMatchingCommands));
                 }
                 for (index, definition) in matches.iter().enumerate() {
                     let group = if index == direct_count {

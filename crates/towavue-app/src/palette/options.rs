@@ -149,7 +149,7 @@ impl CommandPalette {
             .show_popup_styled(ui, crate::chrome::PADDING as f32, |ui| {
                 ui.spacing_mut().item_spacing.y = crate::chrome::ITEM_GAP;
                 if matches.is_empty() {
-                    ui.weak(localization::text(ui.ctx(), Text::NoMatchingCommands));
+                    row::heading(ui, localization::text(ui.ctx(), Text::NoMatchingCommands));
                 }
                 for (index, (original, row)) in matches.iter().enumerate() {
                     let (_, rect) = ui.allocate_space(egui::vec2(

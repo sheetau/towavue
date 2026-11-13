@@ -457,7 +457,7 @@ impl Browser {
             if response.clicked() {
                 self.menu_open = Some(egui::Popup::default_response_id(&response));
             }
-            egui::Popup::menu(&response)
+            chrome::menu_popup(&response, egui::Popup::default_response_id(&response))
                 .style(chrome::menu_style)
                 .align(egui::RectAlign::TOP_START)
                 .align_alternatives(&[])
@@ -558,13 +558,16 @@ impl Browser {
                 *target = Some(Action::Folder(path.clone(), name_response.middle_clicked()));
             }
             if let Some(arrow_response) = &arrow_response {
-                egui::Popup::menu(arrow_response)
-                    .style(chrome::menu_style)
-                    .align(egui::RectAlign::TOP_START)
-                    .align_alternatives(&[])
-                    .show(|ui| {
-                        self.directory_menu(ui, path, 0, target);
-                    });
+                chrome::menu_popup(
+                    arrow_response,
+                    egui::Popup::default_response_id(arrow_response),
+                )
+                .style(chrome::menu_style)
+                .align(egui::RectAlign::TOP_START)
+                .align_alternatives(&[])
+                .show(|ui| {
+                    self.directory_menu(ui, path, 0, target);
+                });
             }
             x = rect.right() + 2.0;
         }

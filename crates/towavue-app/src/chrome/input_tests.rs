@@ -452,3 +452,74 @@ fn filled_combo_popup_rows_align_with_button_and_keep_two_point_gap() {
         assert!((popup.width() - button.width() - 6.0).abs() <= 1.0 / density);
     }
 }
+
+#[test]
+fn combo_repress_closes_on_down_and_does_not_reopen_on_release() {
+    for density in [1.0, 1.25, 2.0] {
+        for in_modal in [false, true] {
+            let context = crate::fonts::test_context();
+            context.global_style_mut(style);
+            context.set_pixels_per_point(density);
+            let draw = |events| {
+                let mut button = Rect::NOTHING;
+                let mut visible = false;
+                let _ = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            Pos2::ZERO,
+                            egui::vec2(640.0, 480.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let mut content = |ui: &mut Ui| {
+                            button = combo_box(
+                                ui,
+                                ComboBox::from_id_salt("repress").selected_text("Choose"),
+                                |ui| {
+                                    visible = true;
+                                    ui.label("Menu content");
+                                },
+                            )
+                            .response
+                            .rect;
+                        };
+                        if in_modal {
+                            set_modal_bounds(&context, context.content_rect());
+                            modal(&context, egui::Id::new("modal"), false).show(&context, content);
+                        } else {
+                            content(ui);
+                        }
+                    },
+                );
+                (button, visible)
+            };
+            for _ in 0..3 {
+                draw(vec![]);
+            }
+            let point = draw(vec![]).0.center();
+            let press = |pressed| egui::Event::PointerButton {
+                pos: point,
+                pressed,
+                button: egui::PointerButton::Primary,
+                modifiers: egui::Modifiers::NONE,
+            };
+            for batched in [false, true] {
+                draw(vec![egui::Event::PointerMoved(point), press(true)]);
+                draw(vec![press(false)]);
+                assert!(draw(vec![]).1, "open: modal={in_modal}, density={density}");
+                let events = if batched {
+                    vec![press(true), press(false)]
+                } else {
+                    vec![press(true)]
+                };
+                assert!(!draw(events).1, "press closes immediately");
+                if !batched {
+                    assert!(!draw(vec![press(false)]).1, "release stays closed");
+                }
+                assert!(!draw(vec![]).1);
+            }
+        }
+    }
+}

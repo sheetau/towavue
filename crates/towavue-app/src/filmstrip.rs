@@ -807,6 +807,7 @@ impl Filmstrip {
                     );
                 }
             }
+            crate::media_preview::thumbnail_divider(ui);
             crate::media_preview::caption(ui, |ui| {
                 ui.add(
                     egui::Label::new(caption)

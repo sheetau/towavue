@@ -6986,6 +6986,7 @@ where
             } else {
                 format_time(media_time(position))
             };
+            media_preview::thumbnail_divider(ui);
             media_preview::caption(ui, |ui| {
                 ui.add(
                     egui::Label::new(caption)
@@ -7101,6 +7102,9 @@ where
                     enabled,
                     grid_layout,
                 );
+                if self.filmstrip_open {
+                    grid_layout.suppress_hover(ui.ctx());
+                }
                 timeline_view::paint(
                     ui,
                     grid_layout,

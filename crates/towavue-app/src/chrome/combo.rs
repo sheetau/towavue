@@ -82,8 +82,7 @@ impl ComboBox {
             visuals.fg_stroke.color,
         );
         let margin = f32::from(MENU_PADDING);
-        let inner = egui::Popup::menu(&response)
-            .id(popup_id)
+        let inner = menu_popup(&response, popup_id)
             .anchor(rect.expand2(egui::vec2(margin, 0.0)))
             .align_alternatives(&[egui::RectAlign::TOP_START])
             .gap(2.0)

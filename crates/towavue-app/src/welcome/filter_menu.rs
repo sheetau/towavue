@@ -3,6 +3,7 @@ use egui::{Event, PointerButton, Popup, PopupCloseBehavior, Response, SetOpenCom
 #[derive(Clone, Default)]
 struct Gesture {
     held: bool,
+    closing: bool,
     frame: Option<u64>,
     open: bool,
     release: Option<egui::Pos2>,
@@ -40,8 +41,10 @@ pub(crate) fn show(
                     } if response.rect.contains(*pos)
                         && context.layer_id_at(*pos) == Some(response.layer_id) =>
                     {
-                        gesture.held = true;
-                        gesture.open = true;
+                        gesture.closing =
+                            Popup::is_id_open(context, Popup::default_response_id(response));
+                        gesture.held = !gesture.closing;
+                        gesture.open = !gesture.closing;
                     }
                     Event::PointerButton {
                         pos,
@@ -57,6 +60,7 @@ pub(crate) fn show(
                     | Event::WindowFocused(false)
                     | Event::Key { pressed: true, .. } => {
                         gesture.held = false;
+                        gesture.closing = false;
                     }
                     _ => {}
                 }
@@ -64,7 +68,9 @@ pub(crate) fn show(
         }
     }
     let owned = gesture.held || gesture.release.is_some() || gesture.open;
-    let command = if gesture.open && !gesture.consumed {
+    let command = if gesture.closing {
+        Some(SetOpenCommand::Bool(false))
+    } else if gesture.open && !gesture.consumed {
         Some(SetOpenCommand::Bool(true))
     } else if !owned && response.clicked() {
         Some(SetOpenCommand::Toggle)
@@ -192,6 +198,13 @@ mod tests {
                 ]);
                 frame(vec![pointer(opener.get().center(), false)]);
                 assert!(Popup::is_any_open(&context));
+                frame(vec![pointer(opener.get().center(), true)]);
+                assert!(!Popup::is_any_open(&context), "repress closes on down");
+                frame(vec![pointer(opener.get().center(), false)]);
+                assert!(!Popup::is_any_open(&context), "release does not reopen");
+                frame(vec![pointer(opener.get().center(), true)]);
+                frame(vec![pointer(opener.get().center(), false)]);
+                assert!(Popup::is_any_open(&context), "a new click may reopen");
                 for _ in 0..3 {
                     frame(vec![]);
                 }

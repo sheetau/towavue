@@ -138,6 +138,15 @@ pub fn tab_hovered(response: &Response) -> bool {
             .is_none_or(|top| top == layer || top == response.layer_id)
 }
 
+pub fn thumbnail_divider(ui: &Ui) {
+    let y = ui.cursor().top();
+    ui.painter().hline(
+        ui.max_rect().x_range(),
+        y,
+        egui::Stroke::new(1.0, crate::chrome::BORDER),
+    );
+}
+
 pub fn caption<R>(ui: &mut Ui, content: impl FnOnce(&mut Ui) -> R) -> R {
     egui::Frame::NONE
         .inner_margin(crate::hover_help::PADDING)

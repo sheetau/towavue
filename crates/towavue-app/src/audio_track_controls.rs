@@ -196,8 +196,7 @@ impl Controls<'_> {
                                 chrome::MUTED
                             },
                         );
-                        egui::Popup::menu(&response)
-                            .id(popup_id)
+                        chrome::menu_popup(&response, popup_id)
                             .align(egui::RectAlign::TOP_START)
                             .gap(2.0)
                             .style(chrome::menu_style)
@@ -311,7 +310,7 @@ impl Controls<'_> {
 }
 
 fn paint_mute(ui: &egui::Ui, rect: egui::Rect, muted: bool, hot: bool) {
-    // Geometry copied from assets/mute-track.svg, Figma node 630:7.
+    // Geometry matches the centered 7-by-7 polyline in assets/mute-track.svg.
     let icon = egui::Rect::from_center_size(rect.center(), egui::vec2(16.0, 16.0));
     let ink = if muted || hot {
         chrome::FOREGROUND
@@ -327,18 +326,23 @@ fn paint_mute(ui: &egui::Ui, rect: egui::Rect, muted: bool, hot: bool) {
             chrome::SURFACE
         },
     );
-    // Center the authored path bounds (4.28026..12.2803) in the background.
-    let point = |x: f32, y: f32| icon.min + egui::vec2(x - 0.28028, y);
-    ui.painter().add(egui::Shape::line(
-        vec![
-            point(4.28026, 12.0),
-            point(4.28026, 4.0),
-            point(8.28026, 8.0),
-            point(12.2803, 4.0),
-            point(12.2803, 12.0),
-        ],
-        egui::Stroke::new(1.0, ink),
-    ));
+    let points = [
+        (11.5, 11.5),
+        (11.5, 4.5),
+        (8.0, 8.0),
+        (4.5, 4.5),
+        (4.5, 11.5),
+    ]
+    .map(|(x, y)| icon.min + egui::vec2(x, y));
+    // Separate segments and half-stroke disks give round joins and caps without
+    // the miter protrusions of a multi-segment egui path.
+    for pair in points.windows(2) {
+        ui.painter()
+            .line_segment([pair[0], pair[1]], egui::Stroke::new(1.0, ink));
+    }
+    for point in points {
+        ui.painter().circle_filled(point, 0.5, ink);
+    }
 }
 
 #[cfg(test)]
@@ -437,15 +441,21 @@ mod tests {
                     _ => None,
                 })
                 .expect("muted background");
-            let path = result
+            let points: Vec<_> = result
                 .shapes
                 .iter()
-                .find_map(|shape| match &shape.shape {
-                    egui::Shape::Path(path) if path.points.len() == 5 => Some(path),
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Circle(circle)
+                        if circle.radius == 0.5 && background.contains(circle.center) =>
+                    {
+                        Some(circle.center)
+                    }
                     _ => None,
                 })
-                .expect("M path");
-            let bounds = egui::Rect::from_points(&path.points);
+                .collect();
+            assert_eq!(points.len(), 5);
+            let bounds = egui::Rect::from_points(&points);
+            assert_eq!(bounds.size(), egui::vec2(7.0, 7.0));
             assert!(bounds.center().distance(background.center()) < 0.001);
             let point = selector.center();
             let button = |pressed| egui::Event::PointerButton {

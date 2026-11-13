@@ -1692,8 +1692,7 @@ impl Filmstrip {
                         ui.new_child(egui::UiBuilder::new().id_salt(path).max_rect(rect));
                     let ui = &mut card_ui;
                     let id = ui.id().with("card");
-                    // Use the last presented image's hit region to start/stop
-                    // the animation, then register this frame's painted bounds.
+                    // The fixed image frame owns input while only its sampled pixels zoom.
                     let hovered = enabled
                         && ui
                             .ctx()
@@ -1721,9 +1720,9 @@ impl Filmstrip {
                             } else {
                                 texture.size_vec2() * uv.size()
                             },
-                            1.0 + 0.05 * hover,
+                            1.0,
                         ),
-                        None => gallery_thumbnail(rect, Vec2::splat(1.0), 1.0 + 0.05 * hover),
+                        None => gallery_thumbnail(rect, Vec2::splat(1.0), 1.0),
                         Some(Err(_)) => rect,
                     };
                     let response = ui.interact(
@@ -1797,7 +1796,10 @@ impl Filmstrip {
                                 ui,
                                 texture.id(),
                                 target,
-                                uv,
+                                Rect::from_center_size(
+                                    uv.center(),
+                                    uv.size() / (1.0 + 0.2 * hover),
+                                ),
                                 target,
                                 egui::CornerRadius::ZERO,
                                 thumbnail_tint(kind),

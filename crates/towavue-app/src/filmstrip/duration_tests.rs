@@ -217,7 +217,12 @@ fn gallery_image_bounds_own_hover_and_clicks_while_cell_whitespace_stays_inert()
     for density in [1.0, 1.25, 2.0] {
         let context = crate::fonts::test_context();
         context.global_style_mut(crate::chrome::style);
-        context.global_style_mut(|style| style.interaction.tooltip_delay = 60.0);
+        context.global_style_mut(|style| {
+            style.interaction.tooltip_delay = 60.0;
+            // Test the actual frame boundary independently of egui's five-point
+            // nearest-widget assistance, which applies both before and after zoom.
+            style.interaction.interact_radius = 0.0;
+        });
         context.enable_accesskit();
         let mut strip =
             Filmstrip::new(PreviewCache::new(root.join("cache")).expect("cache"), || {})
@@ -283,7 +288,17 @@ fn gallery_image_bounds_own_hover_and_clicks_while_cell_whitespace_stays_inert()
                 .expect("bounds");
             assert!((node.x0 - f64::from(bounds.left())).abs() < 0.05);
             assert!((node.x1 - f64::from(bounds.right())).abs() < 0.05);
-            (bounds, output.platform_output.cursor_icon, actions)
+            let uv = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Mesh(mesh) if mesh.texture_id == texture_id => {
+                        Some(Rect::from_min_max(mesh.vertices[0].uv, mesh.vertices[3].uv))
+                    }
+                    _ => None,
+                })
+                .expect("thumbnail UV");
+            (bounds, output.platform_output.cursor_icon, actions, uv)
         };
         for _ in 0..3 {
             frame(vec![]);
@@ -302,29 +317,39 @@ fn gallery_image_bounds_own_hover_and_clicks_while_cell_whitespace_stays_inert()
             vec![button(blank, true)],
             vec![button(blank, false)],
         ] {
-            let (bounds, cursor, actions) = frame(events);
+            let (bounds, cursor, actions, _) = frame(events);
             assert_eq!(bounds, idle, "cell whitespace does not enlarge the image");
             assert_eq!(cursor, egui::CursorIcon::Default);
             assert!(actions.is_empty(), "cell whitespace does not open media");
         }
         frame(vec![egui::Event::PointerMoved(idle.center())]);
-        let halfway = frame(vec![]).0;
-        assert!(
-            halfway.width() > idle.width() && halfway.width() < idle.width() * 1.049,
-            "320 ms animation is still easing after two 80 ms ticks: {idle:?} -> {halfway:?}"
-        );
+        let halfway = frame(vec![]);
+        assert_eq!(halfway.0, idle, "zoom retains frame and input bounds");
+        assert!(halfway.3.width() < 1.0 && halfway.3.width() > 1.0 / 1.2);
         for _ in 0..4 {
             frame(vec![]);
         }
-        let expanded = frame(vec![]).0;
-        assert!((expanded.width() / idle.width() - 1.05).abs() < 0.001);
-        assert!(expanded.center().distance(idle.center()) < 0.001);
-        let edge = egui::pos2((idle.right() + expanded.right()) * 0.5, idle.center().y);
-        frame(vec![egui::Event::PointerMoved(edge), button(edge, true)]);
-        let (_, _, actions) = frame(vec![button(edge, false)]);
+        let zoomed = frame(vec![]);
+        assert_eq!(zoomed.0, idle);
+        assert!((zoomed.3.width() - 1.0 / 1.2).abs() < 0.001);
+        assert!(zoomed.3.center().distance(egui::pos2(0.5, 0.5)) < 0.001);
+        let outside = egui::pos2(idle.right() + 2.0, idle.center().y);
+        frame(vec![
+            egui::Event::PointerMoved(outside),
+            button(outside, true),
+        ]);
         assert!(
-            matches!(actions.as_slice(), [UiAction::OpenMedia(opened, true)] if opened == &path),
-            "the enlarged image edge is clickable"
+            frame(vec![button(outside, false)]).2.is_empty(),
+            "zoom adds no clickable area"
+        );
+        let inside = idle.center();
+        frame(vec![
+            egui::Event::PointerMoved(inside),
+            button(inside, true),
+        ]);
+        let (_, _, actions, _) = frame(vec![button(inside, false)]);
+        assert!(
+            matches!(actions.as_slice(), [UiAction::OpenMedia(opened, true)] if opened == &path)
         );
     }
 }
@@ -506,7 +531,7 @@ fn gallery_grid_reaches_gpu_without_card_backgrounds() {
                     if frame == 7 {
                         let idle = idle_bounds.expect("idle frame");
                         assert_eq!(bounds.center(), idle.center());
-                        assert!((bounds.width() / idle.width() - 1.05).abs() < 0.001);
+                        assert_eq!(bounds, idle, "hover zoom stays inside the original frame");
                     }
                     let rail_marker = output
                         .shapes
@@ -537,13 +562,13 @@ fn gallery_grid_reaches_gpu_without_card_backgrounds() {
                         let marker_x = rail_marker.center().x;
                         assert_eq!(
                             at(marker_x, rail_marker.center().y),
-                            &[255, 255, 255, 255],
+                            &crate::chrome::FOREGROUND.to_array(),
                             "header fade must not dim the rail"
                         );
                         for dy in [-1.0, 1.0] {
                             assert_ne!(
                                 at(marker_x, rail_marker.center().y + dy / density),
-                                &[255, 255, 255, 255],
+                                &crate::chrome::FOREGROUND.to_array(),
                                 "rail occupies exactly one physical row"
                             );
                         }

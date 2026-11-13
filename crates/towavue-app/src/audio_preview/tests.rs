@@ -308,6 +308,13 @@ fn hidden_session_switches_tracks_without_changing_edits_and_moves_choice_with_t
                         .expect("track control");
                     let bounds = node.1.bounds().expect("control bounds");
                     assert_eq!(bounds.y1 - bounds.y0, 24.0, "full-height track input");
+                    if label == "Mute track" {
+                        assert_eq!(
+                            bounds.x1 - bounds.x0,
+                            16.0,
+                            "mute hit target matches artwork width"
+                        );
+                    }
                 }
                 let renderer = destination.renderer.as_mut().expect("renderer");
                 renderer.clear([0.0, 0.0, 0.0, 1.0]).expect("clear");
@@ -384,6 +391,43 @@ fn hidden_session_switches_tracks_without_changing_edits_and_moves_choice_with_t
                     .has_audio()
             );
             assert_eq!(destination.playback_volume(), volume);
+            destination.waveform_loading = false;
+            destination.clear_detailed_waveform();
+            for selected in [false, true] {
+                let result = time_selection::Output {
+                    display_selection: selected.then(|| {
+                        towavue_core::TimeRange::new(
+                            MediaTime::ZERO,
+                            MediaTime::from_nanoseconds(1_000_000_000),
+                        )
+                        .expect("range")
+                    }),
+                    ..Default::default()
+                };
+                let output = context.run_ui(egui::RawInput::default(), |ui| {
+                    destination.draw_waveform_track_hint(
+                        ui,
+                        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 100.0)),
+                        &result,
+                    );
+                });
+                let hint = output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text() == "Waveform: A1" => Some(text),
+                    _ => None,
+                });
+                assert_eq!(
+                    hint.is_some(),
+                    !selected,
+                    "operation captions replace the All waveform hint"
+                );
+                if let Some(hint) = hint {
+                    assert_eq!(
+                        hint.galley.job.sections[0].format.font_id.size,
+                        time_selection::LABEL_SIZE
+                    );
+                    assert_eq!(hint.pos.x, time_selection::LABEL_INSET);
+                }
+            }
             destination.remove_tab(moved, false);
             assert!(!destination.audio_export_tracks.contains_key(&moved));
             assert!(!destination.audio_preview_choices.contains_key(&moved));

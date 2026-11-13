@@ -7217,6 +7217,7 @@ where
                         edit,
                     ));
                 }
+                self.draw_waveform_track_hint(ui, rect, &result);
                 self.draw_waveform_activity(ui, rect);
                 self.draw_timeline_menu(ui, &response, actions);
             },

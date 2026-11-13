@@ -325,13 +325,13 @@ fn gallery_image_bounds_own_hover_and_clicks_while_cell_whitespace_stays_inert()
         frame(vec![egui::Event::PointerMoved(idle.center())]);
         let halfway = frame(vec![]);
         assert_eq!(halfway.0, idle, "zoom retains frame and input bounds");
-        assert!(halfway.3.width() < 1.0 && halfway.3.width() > 1.0 / 1.2);
+        assert!(halfway.3.width() < 1.0 && halfway.3.width() > 1.0 / 1.15);
         for _ in 0..4 {
             frame(vec![]);
         }
         let zoomed = frame(vec![]);
         assert_eq!(zoomed.0, idle);
-        assert!((zoomed.3.width() - 1.0 / 1.2).abs() < 0.001);
+        assert!((zoomed.3.width() - 1.0 / 1.15).abs() < 0.001);
         assert!(zoomed.3.center().distance(egui::pos2(0.5, 0.5)) < 0.001);
         let outside = egui::pos2(idle.right() + 2.0, idle.center().y);
         frame(vec![

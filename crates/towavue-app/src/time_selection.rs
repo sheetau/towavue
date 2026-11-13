@@ -10,7 +10,7 @@ pub(super) use adjustment::stretch_limits;
 mod presentation_tests;
 
 pub(super) const LABEL_SIZE: f32 = crate::chrome::TEXT_SM;
-const LABEL_INSET: f32 = 24.0;
+pub(super) const LABEL_INSET: f32 = 24.0;
 
 pub(super) fn focus_hint(context: &egui::Context) -> Option<String> {
     let (id, text) = context

@@ -1854,7 +1854,7 @@ impl Filmstrip {
                         id.with("gallery-hover"),
                         hovered,
                         0.32,
-                        egui::emath::easing::cubic_out,
+                        |t| 1.0 - (1.0 - t).powi(5),
                     );
                     let uv = self
                         .gallery_video_uvs
@@ -1950,7 +1950,7 @@ impl Filmstrip {
                                 target,
                                 Rect::from_center_size(
                                     uv.center(),
-                                    uv.size() / (1.0 + 0.2 * hover),
+                                    uv.size() / (1.0 + 0.15 * hover),
                                 ),
                                 target,
                                 egui::CornerRadius::ZERO,

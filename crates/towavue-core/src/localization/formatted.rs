@@ -141,6 +141,7 @@ templates! {
     copied_image(width: u32, height: u32) => ("Copied image {width} × {height} px", "画像をコピーしました {width} × {height} px"),
     image_copy_failed(error: &str) => ("Could not copy image: {error}", "画像をコピーできませんでした: {error}"),
     duration_failed(error: &str) => ("Duration unavailable: {error}", "メディアの長さを取得できません: {error}"),
+    shown_waveform_track(track: usize) => ("Waveform: A{track}", "表示波形: A{track}"),
     waveform_failed(error: &str) => ("Waveform unavailable: {error}", "波形を取得できません: {error}"),
     window_action_failed(error: &str) => ("Could not perform window action: {error}", "ウィンドウ操作を実行できませんでした: {error}"),
     shortcuts_reload_failed(error: &str) => ("Shortcut reload failed: {error}", "ショートカットを再読み込みできませんでした: {error}"),

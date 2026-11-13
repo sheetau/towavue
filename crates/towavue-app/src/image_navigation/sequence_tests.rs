@@ -114,7 +114,7 @@ fn scrub_frame(app: &mut App, density: f32, events: Vec<egui::Event>) -> Vec<UiA
 }
 
 fn scrub_point(index: usize) -> egui::Pos2 {
-    egui::pos2(4.0 + 492.0 * index as f32 / 99.0, 270.0)
+    egui::pos2(6.0 + 488.0 * index as f32 / 99.0, 270.0)
 }
 
 fn scrub_button(index: usize, pressed: bool) -> egui::Event {
@@ -145,7 +145,7 @@ fn held_image_scrub_replaces_pending_targets_and_displays_before_release() {
         let tab = app.tabs.active_id();
         let count = if reading { 50 } else { 100 };
         let point =
-            |index: usize| egui::pos2(4.0 + 492.0 * index as f32 / (count - 1) as f32, 270.0);
+            |index: usize| egui::pos2(6.0 + 488.0 * index as f32 / (count - 1) as f32, 270.0);
         let button = |index, pressed| egui::Event::PointerButton {
             pos: point(index),
             button: egui::PointerButton::Primary,

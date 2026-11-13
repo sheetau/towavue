@@ -370,6 +370,7 @@ fn native_position_notifications_do_not_queue_client_redraws() {
                 }
             })
             .expect("app");
+            app.native_caption = Some(NativeCaption::new(window.clone()).expect("caption"));
             app.window = Some(window.clone());
             app.window_size = Some(window.inner_size());
             app.event_loop_proxy = Some(self.0.clone());
@@ -406,6 +407,39 @@ fn native_position_notifications_do_not_queue_client_redraws() {
                     "independent media/UI redraws remain live while moving"
                 );
             }
+            app.native_caption
+                .as_ref()
+                .expect("caption")
+                .verification_size_move(true);
+            for deadline in [
+                None,
+                Some(Instant::now() + Duration::from_secs(60)),
+                Some(Instant::now()),
+            ] {
+                app.native_caption
+                    .as_ref()
+                    .expect("caption")
+                    .set_move_redraw_deadline(deadline);
+                app.redraw_queued.set(false);
+                let before = requests.load(Ordering::Relaxed);
+                for x in 0..256 {
+                    app.window_event(
+                        event_loop,
+                        window.id(),
+                        WindowEvent::Moved(winit::dpi::PhysicalPosition::new(x, 20)),
+                    );
+                }
+                let due = deadline.is_some_and(|due| due <= Instant::now());
+                assert_eq!(
+                    requests.load(Ordering::Relaxed) - before,
+                    usize::from(due),
+                    "only due visual work wakes once across a move burst"
+                );
+            }
+            app.native_caption
+                .as_ref()
+                .expect("caption")
+                .verification_size_move(false);
             event_loop.exit();
         }
         fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}

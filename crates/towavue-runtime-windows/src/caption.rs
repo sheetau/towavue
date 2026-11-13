@@ -56,6 +56,7 @@ struct CaptionState {
     sizing: Cell<bool>,
     move_size_timer: Cell<bool>,
     move_redraw_deadline: Cell<Option<std::time::Instant>>,
+    move_redraw_requested: Cell<bool>,
     #[cfg(test)]
     move_size_redraws: Cell<usize>,
     changing_dpi: Cell<bool>,
@@ -84,6 +85,23 @@ impl NativeCaption {
     /// None keeps a static client idle; explicit input/resize redraws remain independent.
     pub fn set_move_redraw_deadline(&self, deadline: Option<std::time::Instant>) {
         self.state.move_redraw_deadline.set(deadline);
+        self.state.move_redraw_requested.set(false);
+    }
+
+    /// A native move notification can wake due visuals when input starves
+    /// low-priority WM_TIMER/WM_PAINT. The app must queue its coalesced redraw,
+    /// not paint synchronously here. A timer request stays pending until a frame
+    /// publishes its next deadline, so an undelivered WM_PAINT cannot lose the wake.
+    pub fn move_redraw_due(&self) -> bool {
+        self.state.sizing.get()
+            && !self.state.fullscreen.get()
+            && !self.state.changing_dpi.get()
+            && (self.state.move_redraw_requested.get()
+                || self
+                    .state
+                    .move_redraw_deadline
+                    .get()
+                    .is_some_and(|due| due <= std::time::Instant::now()))
     }
 
     /// Consume coalesced system time/settings notifications on the window thread.
@@ -207,6 +225,7 @@ impl NativeCaption {
             sizing: Cell::new(false),
             move_size_timer: Cell::new(false),
             move_redraw_deadline: Cell::new(None),
+            move_redraw_requested: Cell::new(false),
             #[cfg(test)]
             move_size_redraws: Cell::new(0),
             changing_dpi: Cell::new(false),
@@ -436,6 +455,7 @@ impl Drop for NativeCaption {
 
 fn stop_move_size_timer(handle: HWND, state: &CaptionState) {
     state.sizing.set(false);
+    state.move_redraw_requested.set(false);
     if state.move_size_timer.replace(false) {
         // SAFETY: caption ownership restricts this call to the HWND's thread.
         // This ID belongs only to the caption; no callback pointer is installed.
@@ -531,6 +551,7 @@ unsafe extern "system" fn caption_proc(
                 && let Some(window) = state.window.upgrade()
             {
                 state.move_redraw_deadline.set(None);
+                state.move_redraw_requested.set(true);
                 #[cfg(test)]
                 state
                     .move_size_redraws
@@ -978,11 +999,13 @@ mod tests {
             assert!(caption.state.move_size_timer.get(), "real timer creation");
             let before = requests();
             caption.set_move_redraw_deadline(None);
+            assert!(!caption.move_redraw_due());
             dispatch_tick();
             assert_eq!(requests(), before, "static dragging must not repaint");
             caption.set_move_redraw_deadline(Some(Instant::now() + Duration::from_secs(60)));
             dispatch_tick();
             assert_eq!(requests(), before, "future UI deadlines must wait");
+            assert!(!caption.move_redraw_due());
             caption.set_move_redraw_deadline(Some(Instant::now()));
             let start = Instant::now();
             while requests() < before + 3 && start.elapsed() < Duration::from_secs(1) {
@@ -1003,6 +1026,7 @@ mod tests {
                         assert_eq!(message.wParam.0, MOVE_SIZE_TIMER_ID);
                         DispatchMessageW(&message);
                         let sent = requests();
+                        assert!(caption.move_redraw_due(), "unpainted timer wake stays due");
                         dispatch_tick();
                         assert_eq!(requests(), sent, "one scheduled frame cannot flood paints");
                         caption.set_move_redraw_deadline(Some(Instant::now()));
@@ -1028,6 +1052,7 @@ mod tests {
             // SAFETY: owned HWND and a pointer-free lifecycle notification.
             unsafe { SendMessageW(caption.handle, end, None, None) };
             assert!(!caption.state.move_size_timer.get());
+            assert!(!caption.move_redraw_due(), "ended move cannot wake frames");
             let before = requests();
             dispatch_tick();
             assert_eq!(

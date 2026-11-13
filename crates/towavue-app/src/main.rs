@@ -13530,15 +13530,20 @@ where
             self.finish_queued_media_release();
             self.cancel_hold_speed();
         }
-        // Redraw renders below; resize owns its synchronous or queued repaint.
-        // Position-only moves retain the same client pixels. Repainting each Moved
-        // event makes presentation block native dragging; DPI, resize, visibility,
-        // playback and UI changes retain their independent repaint paths.
-        if repaint
-            && !matches!(
-                event,
-                WindowEvent::RedrawRequested | WindowEvent::Resized(_) | WindowEvent::Moved(_)
-            )
+        // Position changes retain client pixels, but continuous native movement
+        // can starve WM_TIMER and WM_PAINT. Queue only due visual work through
+        // the normal coalesced event route; never draw inline in a move callback.
+        let move_repaint = matches!(event, WindowEvent::Moved(_))
+            && self
+                .native_caption
+                .as_ref()
+                .is_some_and(NativeCaption::move_redraw_due);
+        if move_repaint
+            || (repaint
+                && !matches!(
+                    event,
+                    WindowEvent::RedrawRequested | WindowEvent::Resized(_) | WindowEvent::Moved(_)
+                ))
         {
             self.request_redraw();
         }

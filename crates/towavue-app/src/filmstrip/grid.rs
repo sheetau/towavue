@@ -36,7 +36,7 @@ impl Grid {
     }
 
     pub fn padding(self) -> f32 {
-        (self.viewport - self.cell).max(0.0) * 0.5
+        ROW_GAP
     }
 
     pub fn height(self, count: usize) -> f32 {

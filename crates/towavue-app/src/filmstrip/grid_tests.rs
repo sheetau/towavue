@@ -100,7 +100,7 @@ fn grid_keeps_filmstrip_spacing_and_keyboard_target_through_scroll_and_tab_resto
         let first = card(&strip, 0);
         assert!((first.size().length() - layout::DIAMETER).abs() < 0.001);
         assert!((first.center().x - 220.0).abs() < 0.001);
-        assert!((first.center().y - 288.0).abs() < 0.001);
+        assert!((first.center().y - 168.0).abs() < 0.001);
         frame(
             &mut strip,
             &context,
@@ -299,10 +299,13 @@ fn grid_cells_keep_fixed_pitch_and_wide_caption_gaps() {
         for index in [0, count - 1] {
             let offset = grid.offset(index, count);
             let rect = grid.rect(index, egui::pos2(0.0, -offset), Vec2::splat(1.0));
-            assert!(
-                (rect.center().y - grid.viewport * 0.5).abs() < 0.01,
-                "end row centers in viewport"
-            );
+            let row = index / grid.columns;
+            let top = grid.padding() + row as f32 * grid.pitch();
+            assert_eq!(grid.padding(), grid::ROW_GAP);
+            assert!((rect.center().y + offset - top - grid.cell * 0.5).abs() < 0.01);
+            if index == count - 1 {
+                assert!((grid.height(count) - top - grid.cell - grid::ROW_GAP).abs() < 0.01);
+            }
         }
         let available = (width - 2.0 * gallery_side_inset(width)).max(1.0);
         assert_eq!(grid.cell, layout::DIAMETER.min(available));

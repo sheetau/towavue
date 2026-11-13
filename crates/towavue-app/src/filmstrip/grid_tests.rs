@@ -6,9 +6,9 @@ fn frame(
     snapshot: &FolderSnapshot,
     time: f64,
     events: Vec<egui::Event>,
-) -> Vec<UiAction> {
+) -> (Vec<UiAction>, egui::FullOutput) {
     let mut actions = Vec::new();
-    let _ = context.run_ui(
+    let output = context.run_ui(
         egui::RawInput {
             screen_rect: Some(Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -31,7 +31,7 @@ fn frame(
             )
         },
     );
-    actions
+    (actions, output)
 }
 
 fn key(key: egui::Key) -> egui::Event {
@@ -100,7 +100,7 @@ fn grid_keeps_filmstrip_spacing_and_keyboard_target_through_scroll_and_tab_resto
         let first = card(&strip, 0);
         assert!((first.size().length() - layout::DIAMETER).abs() < 0.001);
         assert!((first.center().x - 220.0).abs() < 0.001);
-        assert!((first.center().y - 108.0).abs() < 0.001);
+        assert!((first.center().y - 168.0).abs() < 0.001);
         frame(
             &mut strip,
             &context,
@@ -128,7 +128,7 @@ fn grid_keeps_filmstrip_spacing_and_keyboard_target_through_scroll_and_tab_resto
                 .chain([key(egui::Key::Enter)])
                 .collect(),
         );
-        assert!(actions.iter().any(|action| matches!(action, UiAction::OpenFilmstripMedia(path, false) if path == &snapshot.items[65].path)), "rapid navigation opens its offscreen target");
+        assert!(actions.0.iter().any(|action| matches!(action, UiAction::OpenFilmstripMedia(path, false) if path == &snapshot.items[65].path)), "rapid navigation opens its offscreen target");
         assert!(strip.card_paths.len() <= VISIBLE_PREVIEW_LIMIT);
         let destination = strip.layout.center_offset(65);
         assert!(strip.scroll_offset < destination);
@@ -144,13 +144,33 @@ fn grid_keeps_filmstrip_spacing_and_keyboard_target_through_scroll_and_tab_resto
         let before = strip.scroll_offset;
         let mut refreshed = snapshot.clone();
         refreshed.generation += 1;
-        frame(&mut strip, &context, &refreshed, 1.1, vec![]);
+        let focus_y = |output: &egui::FullOutput| {
+            output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(rect)
+                        if rect.fill == crate::chrome::MUTED
+                            && rect.rect.left() > 900.0
+                            && rect.rect.width() > 20.0 =>
+                    {
+                        Some(rect.rect.center().y)
+                    }
+                    _ => None,
+                })
+                .expect("long gray focus marker")
+        };
+        let before_marker = focus_y(&frame(&mut strip, &context, &refreshed, 1.1, vec![]).1);
         assert_eq!(
             strip.scroll_offset, before,
             "folder refresh does not recenter"
         );
         strip.reveal_current();
-        frame(&mut strip, &context, &snapshot, 1.2, vec![]);
+        let moving_marker = focus_y(&frame(&mut strip, &context, &snapshot, 1.2, vec![]).1);
+        assert!(
+            moving_marker < before_marker && moving_marker > 8.0 + 1.0 / density,
+            "filename reveal animates the focus marker"
+        );
         assert!(strip.scroll_offset > 0.0 && strip.scroll_offset < before);
         for step in 0..60 {
             frame(

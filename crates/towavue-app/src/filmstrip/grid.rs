@@ -1,8 +1,8 @@
 use super::*;
 
 /// Filmstrip's original thumbnail diameter and horizontal pitch, arranged in
-/// rows inside Gallery's side gutters. Reserve room for three caption lines.
-pub(super) const ROW_GAP: f32 = 128.0;
+/// rows inside Gallery's side gutters. Reserve room for four caption lines.
+pub(super) const ROW_GAP: f32 = 108.0;
 
 /// Captions and late preview sizes never change the scroll extent.
 #[derive(Clone, Copy, PartialEq)]
@@ -36,11 +36,11 @@ impl Grid {
     }
 
     pub fn height(self, count: usize) -> f32 {
-        GALLERY_GAP + count.div_ceil(self.columns) as f32 * self.pitch() + 16.0
+        ROW_GAP + count.div_ceil(self.columns) as f32 * self.pitch() + 16.0
     }
 
     pub fn offset(self, index: usize, count: usize) -> f32 {
-        (GALLERY_GAP + (index / self.columns) as f32 * self.pitch() + self.cell * 0.5
+        (ROW_GAP + (index / self.columns) as f32 * self.pitch() + self.cell * 0.5
             - self.viewport * 0.5)
             .clamp(0.0, (self.height(count) - self.viewport).max(0.0))
     }
@@ -50,7 +50,7 @@ impl Grid {
             origin
                 + egui::vec2(
                     self.left + (index % self.columns) as f32 * (self.cell + layout::GAP),
-                    GALLERY_GAP + (index / self.columns) as f32 * self.pitch(),
+                    ROW_GAP + (index / self.columns) as f32 * self.pitch(),
                 ),
             Vec2::splat(self.cell),
         );
@@ -59,10 +59,10 @@ impl Grid {
 
     pub fn visible(self, viewport: Rect, count: usize) -> Range<usize> {
         // Include the caption band even when its thumbnail is just above view.
-        let first = ((viewport.top() - GALLERY_GAP - 90.0) / self.pitch())
+        let first = ((viewport.top() - ROW_GAP - 90.0) / self.pitch())
             .floor()
             .max(0.0) as usize;
-        let last = ((viewport.bottom() - GALLERY_GAP) / self.pitch())
+        let last = ((viewport.bottom() - ROW_GAP) / self.pitch())
             .ceil()
             .max(0.0) as usize
             + 1;

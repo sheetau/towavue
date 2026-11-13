@@ -83,7 +83,7 @@ impl Layout {
 
     pub fn nearest(&self, offset: f32) -> usize {
         if let Some(grid) = self.grid {
-            return (((offset + grid.viewport * 0.5 - GALLERY_GAP) / grid.pitch())
+            return (((offset + grid.viewport * 0.5 - grid::ROW_GAP) / grid.pitch())
                 .floor()
                 .max(0.0) as usize
                 * grid.columns)

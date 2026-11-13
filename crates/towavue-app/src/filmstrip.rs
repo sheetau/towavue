@@ -192,7 +192,7 @@ pub struct Filmstrip {
     pointer_position: Option<egui::Pos2>,
     window_focused: bool,
     card_paths: Vec<(egui::Id, PathBuf, usize)>,
-    tab_navigation: Option<(u64, usize)>,
+    tab_navigation: Option<(u64, usize, bool)>,
     scroll_offset: f32,
     scroll_target: Option<usize>,
     scroll_time: Option<f64>,
@@ -975,8 +975,17 @@ impl Filmstrip {
         } else {
             None
         };
+        let tab_traversal = self
+            .tab_navigation
+            .filter(|(saved, _, _)| *saved == frame)
+            .map_or_else(
+                || context.input(|input| input.key_pressed(egui::Key::Tab)),
+                |(_, _, snap)| snap,
+            );
         let tab_target = if can_focus && !context.text_edit_focused() {
-            if let Some((_, target)) = self.tab_navigation.filter(|(saved, _)| *saved == frame) {
+            if let Some((_, target, _)) =
+                self.tab_navigation.filter(|(saved, _, _)| *saved == frame)
+            {
                 Some(target)
             } else if let Some(count) =
                 snapshot
@@ -1072,7 +1081,7 @@ impl Filmstrip {
         if let Some(target) = tab_target {
             // Resolve folder traversal before virtualization, including offscreen neighbors. Reuse this
             // target across discarded passes so one key cannot advance twice.
-            self.tab_navigation = Some((frame, target));
+            self.tab_navigation = Some((frame, target, tab_traversal));
             context.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
         }
         let mut pages = 0;
@@ -1398,7 +1407,7 @@ impl Filmstrip {
                     // Reserve a stable caption band independent of aspect or filename.
                     // Compact windows elide sooner so the position above stays visible.
                     let caption_rows = if grid {
-                        3
+                        4
                     } else {
                         ((ui.clip_rect().height()
                             - layout::DIAMETER
@@ -1674,7 +1683,7 @@ impl Filmstrip {
                         snapshot.items.len(),
                         selected,
                         selection,
-                        snap || restore || reflow.is_some() || tab_target.is_some(),
+                        snap || restore || reflow.is_some() || tab_traversal,
                     );
                 }
                 self.scroll_offset = if grid {

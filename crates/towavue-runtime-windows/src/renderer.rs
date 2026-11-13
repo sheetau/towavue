@@ -983,11 +983,6 @@ impl FrameRenderer {
     }
 
     pub fn present_surface(&self) -> Result<(), RenderError> {
-        if let Some(surface) = &self.caption_surface {
-            let (width, height) = self.ensure_surface()?;
-            // DWM can publish new button bounds after the last client resize.
-            surface.refresh_clip(width, height)?;
-        }
         // The swap chain and device stay owned for the duration of presentation.
         #[cfg(not(feature = "presentation-verification"))]
         let sync_interval = 1;

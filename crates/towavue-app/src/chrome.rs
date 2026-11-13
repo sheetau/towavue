@@ -5,6 +5,7 @@ pub use combo::ComboBox;
 mod submenu;
 use egui::{Color32, Pos2, Rect, Stroke, Ui, emath::GuiRounding};
 pub use submenu::{chevron, menu_button, remember_menu_bounds, submenu, submenu_button};
+#[cfg(test)]
 use towavue_runtime_windows::{CaptionAction, CaptionButton};
 
 use crate::hover_help::HoverHelp;
@@ -33,44 +34,8 @@ pub use tab_fade::{tab_strip_fades, tab_title_fade, tab_title_layout};
 #[cfg(test)]
 pub use tab_fade::{tab_title, tab_title_with_icon};
 
-pub fn caption_accessibility(ui: &Ui, buttons: &[CaptionButton]) -> Vec<CaptionAction> {
-    let mut actions = Vec::new();
-    for button in buttons {
-        let id = egui::Id::new(("native-caption", button.action));
-        let enabled = ui.is_enabled() && button.enabled;
-        let bounds = button.bounds / ui.ctx().pixels_per_point();
-        ui.ctx().accesskit_node_builder(id, |node| {
-            node.set_role(egui::accesskit::Role::Button);
-            node.set_label(button.label);
-            node.set_bounds(egui::accesskit::Rect::new(
-                bounds.left().into(),
-                bounds.top().into(),
-                bounds.right().into(),
-                bounds.bottom().into(),
-            ));
-            if enabled {
-                node.add_action(egui::accesskit::Action::Click);
-            } else {
-                node.set_disabled();
-            }
-        });
-        // Semantic proxies only: DWM keeps all drawing and native pointer handling.
-        // Do not add invisible egui hit targets or keyboard focus stops.
-        ui.input_mut(|input| {
-            input.consume_accesskit_action_requests(id, |request| {
-                if request.action == egui::accesskit::Action::Click {
-                    if enabled {
-                        actions.push(button.action);
-                    }
-                    true
-                } else {
-                    false
-                }
-            });
-        });
-    }
-    actions
-}
+mod caption;
+pub use caption::{CAPTION_BUTTON_WIDTH, caption_controls};
 
 mod tokens;
 pub use tokens::*;
@@ -1365,6 +1330,9 @@ mod tests {
                     label: "Close window",
                     bounds: Rect::from_min_max(egui::pos2(800.0, 1.0), egui::pos2(847.0, 31.0)),
                     enabled: native_enabled,
+                    hovered: false,
+                    pressed: false,
+                    maximized: false,
                 };
                 let id = egui::Id::new(("native-caption", button.action));
                 let input = egui::RawInput {
@@ -1382,7 +1350,7 @@ mod tests {
                     if !ui_enabled {
                         ui.disable();
                     }
-                    actions = caption_accessibility(ui, std::slice::from_ref(&button));
+                    actions = caption_controls(ui, std::slice::from_ref(&button));
                     assert!(
                         !ui.input(|input| input.has_accesskit_action_request(id, Action::Click))
                     );

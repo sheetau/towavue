@@ -223,7 +223,9 @@ fn native_window_placement_preserves_normal_bounds_and_clamps_restore() {
                     .expect("visible frame");
                     assert!(visible.left >= info.rcWork.left && visible.top >= info.rcWork.top);
                     assert!(
-                        visible.right <= info.rcWork.right && visible.bottom <= info.rcWork.bottom
+                        visible.right <= info.rcWork.right && visible.bottom <= info.rcWork.bottom,
+                        "visible {visible:?}, work {:?}, outer {outer:?}",
+                        info.rcWork
                     );
                 }
                 let inner = window.inner_size().to_logical::<f64>(window.scale_factor());

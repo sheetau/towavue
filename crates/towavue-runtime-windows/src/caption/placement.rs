@@ -59,6 +59,10 @@ impl NativeCaption {
                 ..Default::default()
             };
             SetWindowPlacement(self.handle, &placement)?;
+            // A hidden restore can move to another DPI before Windows recalculates
+            // its client frame. Refresh it before measuring borders/minimum size;
+            // otherwise a former 150% border can push a 100% window off the work area.
+            self.refresh_frame()?;
             let dpi = GetDpiForWindow(self.handle);
             let mut outer = RECT::default();
             let mut client = RECT::default();

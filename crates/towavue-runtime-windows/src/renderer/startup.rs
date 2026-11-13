@@ -365,8 +365,6 @@ impl StartupSurface {
     }
 
     pub fn present(&self) -> Result<(), RenderError> {
-        self.surface
-            .refresh_clip(self.size[0] as u32, self.size[1] as u32)?;
         // Synchronously submit the cached complete frame on its owner thread.
         // The caller uses the same post-presentation completion boundary as GPU.
         unsafe {

@@ -5,6 +5,28 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::platform::windows::EventLoopBuilderExtWindows;
 
+// Native reference only; production custom controls never query TITLEBARINFOEX.
+fn titlebar_info(handle: HWND) -> Option<(TITLEBARINFOEX, POINT)> {
+    let mut info = TITLEBARINFOEX {
+        cbSize: size_of::<TITLEBARINFOEX>() as u32,
+        ..Default::default()
+    };
+    let mut origin = POINT::default();
+    // SAFETY: the owned reference window is retained on this thread; stack outputs
+    // are borrowed only during the synchronous native query.
+    unsafe {
+        SendMessageW(
+            handle,
+            WM_GETTITLEBARINFOEX,
+            None,
+            Some(LPARAM((&mut info as *mut TITLEBARINFOEX) as isize)),
+        );
+        ClientToScreen(handle, &mut origin)
+            .as_bool()
+            .then_some((info, origin))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Geometry {
     dpi: u32,

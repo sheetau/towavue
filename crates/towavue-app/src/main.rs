@@ -5767,10 +5767,6 @@ where
         let return_to_tab =
             tab_menu_focus.is_some_and(|(target, _)| !self.tabs.tab_ids().any(|tab| tab == target));
         let density = root.ctx().pixels_per_point();
-        let native = self
-            .native_caption
-            .as_ref()
-            .map(|caption| caption.controls_bounds());
         let layout = chrome::title_layout(
             root.input(|input| input.safe_area_insets().0.top) * density,
             root.max_rect().top(),
@@ -5795,7 +5791,18 @@ where
                 data.remove::<f32>(key);
             }
         });
-        let controls_width = native.map_or(154.0, |bounds| bounds.width() / density);
+        let controls_width = 3.0 * chrome::CAPTION_BUTTON_WIDTH;
+        if let Some(caption) = &self.native_caption {
+            caption.set_controls_bounds(
+                egui::Rect::from_min_max(
+                    egui::pos2(root.max_rect().right() - controls_width, layout.drag_top),
+                    egui::pos2(
+                        root.max_rect().right(),
+                        root.max_rect().top() + layout.height,
+                    ),
+                ) * density,
+            );
+        }
         let panel = egui::Panel::top("tabs")
             .exact_size(layout.height)
             .show_separator_line(false)
@@ -6553,7 +6560,7 @@ where
                     });
                     if let Some(caption) = &self.native_caption {
                         actions.extend(
-                            chrome::caption_accessibility(
+                            chrome::caption_controls(
                                 ui,
                                 &caption.accessible_buttons(localization::language(ui.ctx())),
                             )
@@ -6567,12 +6574,13 @@ where
                 });
             });
         let loading = self.toolbar_loading(root.ctx());
-        export_progress::draw(
-            root,
-            panel.response.rect,
-            self.active_export.as_mut(),
-            loading,
-        );
+        let mut progress_bounds = panel.response.rect;
+        if self.native_caption.is_some() {
+            // The toolbar's separator/progress pixel must not cover custom controls.
+            progress_bounds.max.x =
+                (progress_bounds.right() - controls_width).max(progress_bounds.left());
+        }
+        export_progress::draw(root, progress_bounds, self.active_export.as_mut(), loading);
         self.prepare_image_tab(image_preparation_target);
         if let Some(tab) = playback_preparation_target {
             self.prepare_playback_tab(tab);

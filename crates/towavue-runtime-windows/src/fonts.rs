@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 pub struct UiFonts {
     pub japanese: Option<(Vec<u8>, u32)>,
     pub symbols: Option<Vec<u8>>,
+    pub caption: Option<Vec<u8>>,
     pub fallbacks: Vec<UiFontFallback>,
 }
 
@@ -12,6 +13,7 @@ impl UiFonts {
         Self {
             japanese: japanese_ui_font(),
             symbols: ui_symbol_font(),
+            caption: caption_font(),
             fallbacks: ui_font_fallbacks(),
         }
     }
@@ -162,6 +164,31 @@ pub fn japanese_ui_font() -> Option<(Vec<u8>, u32)> {
         })
 }
 
+/// Read Zed's caption icon family from Windows, without redistributing font files.
+fn caption_font() -> Option<Vec<u8>> {
+    use windows::Win32::System::SystemInformation::OSVERSIONINFOW;
+    #[link(name = "ntdll")]
+    unsafe extern "system" {
+        fn RtlGetVersion(version: *mut OSVERSIONINFOW) -> i32;
+    }
+    let mut version = OSVERSIONINFOW {
+        dwOSVersionInfoSize: size_of::<OSVERSIONINFOW>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: the system API fills this initialized version structure synchronously.
+    // Unlike manifest-sensitive version helpers, this selects the actual OS family.
+    let fluent = unsafe { RtlGetVersion(&mut version) } >= 0 && version.dwBuildNumber >= 22000;
+    let directory = PathBuf::from(std::env::var_os("WINDIR")?).join("Fonts");
+    let name = if fluent {
+        "SegoeIcons.ttf"
+    } else {
+        "segmdl2.ttf"
+    };
+    std::fs::read(directory.join(name))
+        .or_else(|_| std::fs::read(directory.join("segmdl2.ttf")))
+        .ok()
+}
+
 /// Reads the installed Windows symbol face without copying or modifying it.
 pub fn ui_symbol_font() -> Option<Vec<u8>> {
     let directory = PathBuf::from(std::env::var_os("WINDIR")?).join("Fonts");
@@ -178,6 +205,7 @@ mod tests {
         let serial = UiFonts::read();
         assert_eq!(prepared.japanese, serial.japanese);
         assert_eq!(prepared.symbols, serial.symbols);
+        assert_eq!(prepared.caption, serial.caption);
         assert_eq!(prepared.fallbacks.len(), serial.fallbacks.len());
         for (prepared, serial) in prepared.fallbacks.iter().zip(&serial.fallbacks) {
             assert_eq!(prepared.name, serial.name);
@@ -194,6 +222,7 @@ mod tests {
             UiFonts {
                 japanese: None,
                 symbols: None,
+                caption: None,
                 fallbacks: Vec::new(),
             }
         })));

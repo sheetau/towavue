@@ -27,7 +27,7 @@ pub fn install_prepared(
     prepared: Option<towavue_runtime_windows::UiFontPreparation>,
 ) -> bool {
     let (fonts, available) = INSTALLED.get_or_init(|| {
-        let towavue_runtime_windows::UiFonts { japanese, symbols, fallbacks } = FONT_BYTES.get_or_init(|| prepared
+        let towavue_runtime_windows::UiFonts { japanese, symbols, caption, fallbacks } = FONT_BYTES.get_or_init(|| prepared
             .map(towavue_runtime_windows::UiFontPreparation::finish)
             .unwrap_or_else(towavue_runtime_windows::UiFonts::read));
         let available = japanese.is_some();
@@ -42,6 +42,12 @@ pub fn install_prepared(
             }),
             symbols.as_ref().map(|bytes| egui::FontData::from_static(bytes)),
         );
+        if let Some(bytes) = caption {
+            fonts.font_data.insert("windows-caption".into(), egui::FontData::from_static(bytes).into());
+            fonts.families.insert(egui::FontFamily::Name("windows-caption".into()), vec!["windows-caption".into()]);
+        } else {
+            towavue_runtime_windows::diagnostic!("Windows caption icon font is unavailable");
+        }
         for fallback in fallbacks {
             let mut data = egui::FontData::from_static(&fallback.data);
             data.index = fallback.index;

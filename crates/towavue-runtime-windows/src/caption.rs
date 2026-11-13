@@ -6,14 +6,14 @@ use towavue_core::localization::{Language, Text};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
-    DWMWA_CAPTION_BUTTON_BOUNDS, DWMWA_CAPTION_COLOR, DWMWA_TRANSITIONS_FORCEDISABLED,
-    DWMWA_USE_IMMERSIVE_DARK_MODE, DwmDefWindowProc, DwmExtendFrameIntoClientArea,
-    DwmGetWindowAttribute, DwmSetWindowAttribute,
+    DWMWA_CAPTION_COLOR, DWMWA_TRANSITIONS_FORCEDISABLED, DWMWA_USE_IMMERSIVE_DARK_MODE,
+    DwmExtendFrameIntoClientArea, DwmGetWindowAttribute, DwmSetWindowAttribute,
 };
+#[cfg(test)]
+use windows::Win32::Graphics::Gdi::ClientToScreen;
 use windows::Win32::Graphics::Gdi::{
-    BLACK_BRUSH, ClientToScreen, CombineRgn, CreateRectRgn, DeleteObject, FillRect, GetDC,
-    GetMonitorInfoW, GetStockObject, HBRUSH, HDC, InvalidateRect, MONITOR_DEFAULTTONEAREST,
-    MONITORINFO, MonitorFromRect, RGN_DIFF, ReleaseDC, ScreenToClient, SetWindowRgn, ValidateRect,
+    BLACK_BRUSH, FillRect, GetMonitorInfoW, GetStockObject, HBRUSH, HDC, MONITOR_DEFAULTTONEAREST,
+    MONITORINFO, MonitorFromRect, ScreenToClient, ValidateRect,
 };
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Controls::MARGINS;
@@ -27,7 +27,7 @@ const SUBCLASS_ID: usize = 0x7476_6361;
 const MOVE_SIZE_TIMER_ID: usize = 0x7476_6d73;
 const MOVE_SIZE_FRAME_MS: u32 = 10;
 
-mod info;
+mod buttons;
 mod placement;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -37,17 +37,21 @@ pub enum CaptionAction {
     Close,
 }
 
-/// Accessibility metadata for an OS-drawn button, in physical client coordinates.
+/// App-painted native control, in physical client coordinates.
+#[derive(Clone, Copy, Debug)]
 pub struct CaptionButton {
     pub action: CaptionAction,
     pub label: &'static str,
     pub bounds: egui::Rect,
     pub enabled: bool,
+    pub hovered: bool,
+    pub pressed: bool,
+    pub maximized: bool,
 }
 
 struct CaptionState {
     window: std::sync::Weak<Window>,
-    info: info::InfoCache,
+    controls: buttons::State,
     fullscreen: Cell<bool>,
     sizing: Cell<bool>,
     move_size_timer: Cell<bool>,
@@ -191,7 +195,7 @@ impl NativeCaption {
         }
         let state = Rc::new(CaptionState {
             window: Arc::downgrade(&window),
-            info: info::InfoCache::default(),
+            controls: buttons::State::default(),
             fullscreen: Cell::new(false),
             sizing: Cell::new(false),
             move_size_timer: Cell::new(false),
@@ -248,8 +252,8 @@ impl NativeCaption {
                 (&dark as *const i32).cast(),
                 size_of::<i32>() as u32,
             );
-            // Keep the inactive native background aligned with the black client;
-            // DWM still owns glyph/hover colors. Older Windows can reject this.
+            // Keep the frame background aligned with the black client.
+            // egui paints the controls; older Windows can reject this attribute.
             let background = 0_u32;
             let _ = DwmSetWindowAttribute(
                 handle,
@@ -264,6 +268,8 @@ impl NativeCaption {
     }
 
     fn resize_client(&self, size: winit::dpi::PhysicalSize<u32>) -> windows::core::Result<()> {
+        // Hidden cross-monitor moves may retain the previous DPI's client frame.
+        self.refresh_frame()?;
         // SAFETY: retained same-thread window; stack outputs are not retained.
         // Preserve client dimensions without activation, movement or style estimates.
         unsafe {
@@ -304,7 +310,7 @@ impl NativeCaption {
         if fullscreen == self.state.fullscreen.get() {
             return;
         }
-        self.state.info.invalidate();
+        self.state.controls.clear(self.handle, &self.state);
         #[cfg(test)]
         let started = std::time::Instant::now();
         if fullscreen {
@@ -352,80 +358,17 @@ impl NativeCaption {
         )
     }
 
+    /// Publish the actual toolbar bounds; native hit testing and egui share them.
+    pub fn set_controls_bounds(&self, bounds: egui::Rect) {
+        self.state.controls.set_bounds(self.handle, bounds);
+    }
+
     pub fn accessible_buttons(&self, language: Language) -> Vec<CaptionButton> {
-        let mut buttons = Vec::with_capacity(3);
-        if self.state.fullscreen.get() {
-            return buttons;
-        }
-        let Some((info, origin)) = self.state.info.read(self.handle) else {
-            return buttons;
-        };
-        // SAFETY: scalar query on the retained UI-thread window.
-        unsafe {
-            let maximized = IsZoomed(self.handle).as_bool();
-            for (index, action, label) in [
-                (
-                    2,
-                    CaptionAction::Minimize,
-                    Text::CaptionMinimize.in_language(language),
-                ),
-                (
-                    3,
-                    CaptionAction::ToggleMaximize,
-                    if maximized {
-                        Text::CaptionRestore.in_language(language)
-                    } else {
-                        Text::CaptionMaximize.in_language(language)
-                    },
-                ),
-                (
-                    5,
-                    CaptionAction::Close,
-                    Text::CaptionClose.in_language(language),
-                ),
-            ] {
-                let rect = info.rgrect[index];
-                // TITLEBARINFOEX uses STATE_SYSTEM_INVISIBLE/OFFSCREEN/UNAVAILABLE.
-                if info.rgstate[index] & 0x18000 != 0
-                    || rect.right <= rect.left
-                    || rect.bottom <= rect.top
-                {
-                    continue;
-                }
-                buttons.push(CaptionButton {
-                    action,
-                    label,
-                    bounds: egui::Rect::from_min_max(
-                        egui::pos2((rect.left - origin.x) as f32, (rect.top - origin.y) as f32),
-                        egui::pos2(
-                            (rect.right - origin.x) as f32,
-                            (rect.bottom - origin.y) as f32,
-                        ),
-                    ),
-                    enabled: info.rgstate[index] & 1 == 0,
-                });
-            }
-        }
-        buttons
+        buttons::snapshot(self.handle, &self.state, language)
     }
 
     pub fn invoke(&self, action: CaptionAction) -> windows::core::Result<()> {
-        // SAFETY: scalar system command queued only to our retained window. Close
-        // follows winit's normal CloseRequested route; no HWND is destroyed here.
-        unsafe {
-            let command = match action {
-                CaptionAction::Minimize => SC_MINIMIZE,
-                CaptionAction::ToggleMaximize if IsZoomed(self.handle).as_bool() => SC_RESTORE,
-                CaptionAction::ToggleMaximize => SC_MAXIMIZE,
-                CaptionAction::Close => SC_CLOSE,
-            };
-            PostMessageW(
-                Some(self.handle),
-                WM_SYSCOMMAND,
-                WPARAM(command as usize),
-                LPARAM(0),
-            )
-        }
+        buttons::invoke(self.handle, action)
     }
 
     /// Maximized windows extend above the monitor; keep UI below that invisible strip.
@@ -459,103 +402,13 @@ impl NativeCaption {
     }
 }
 
-fn titlebar_info(handle: HWND) -> Option<(TITLEBARINFOEX, POINT)> {
-    #[cfg(feature = "presentation-verification")]
-    crate::record_burst(crate::BurstEvent::CaptionInfoQueryStarted, 0, None, [0; 3]);
-    let mut info = TITLEBARINFOEX {
-        cbSize: size_of::<TITLEBARINFOEX>() as u32,
-        ..Default::default()
-    };
-    let mut origin = POINT::default();
-    // SAFETY: callers retain this UI-thread window. Windows writes only initialized
-    // stack outputs and does not retain their addresses across the synchronous call.
-    let result = unsafe {
-        SendMessageW(
-            handle,
-            WM_GETTITLEBARINFOEX,
-            None,
-            Some(LPARAM((&mut info as *mut TITLEBARINFOEX) as isize)),
-        );
-        ClientToScreen(handle, &mut origin)
-            .as_bool()
-            .then_some((info, origin))
-    };
-    #[cfg(feature = "presentation-verification")]
-    crate::record_burst(crate::BurstEvent::CaptionInfoQueryFinished, 0, None, [0; 3]);
-    result
-}
-
 fn caption_bounds(handle: HWND, state: &CaptionState) -> RECT {
-    let mut client = RECT::default();
-    // SAFETY: stack output for this UI-thread window; failure leaves an empty rect.
-    unsafe {
-        let _ = GetClientRect(handle, &mut client);
-    }
-    let fallback = || {
-        // SAFETY: synchronous scalar query on the retained UI-thread window.
-        let dpi = unsafe { GetDpiForWindow(handle) } as i32;
-        RECT {
-            left: (client.right - 154 * dpi / 96).max(0),
-            top: 0,
-            right: client.right,
-            bottom: 32 * dpi / 96,
-        }
-    };
-    // Hidden/minimized native rectangles may look valid but describe neither the
-    // current client nor its visible controls. Do not cache them as a child cutout.
-    // SAFETY: scalar state queries on the retained UI-thread window.
-    if unsafe { !IsWindowVisible(handle).as_bool() || IsIconic(handle).as_bool() } {
-        return fallback();
-    }
-    if let Some((info, origin)) = state.info.read(handle) {
-        let mut left = client.right;
-        let mut bottom = 0;
-        for index in [2, 3, 5] {
-            let rect = info.rgrect[index];
-            if info.rgstate[index] & 0x18000 == 0
-                && rect.right > rect.left
-                && rect.bottom > rect.top
-            {
-                left = left.min(rect.left - origin.x);
-                bottom = bottom.max(rect.bottom - origin.y);
-            }
-        }
-        if left < client.right && bottom > 0 {
-            // Reserve the buttons, not DWM's wider approximate strip. Keep the
-            // native outer edge exposed and include the entire button height.
-            return RECT {
-                left: left.max(0),
-                top: 0,
-                right: client.right,
-                bottom,
-            };
-        }
-    }
-    let mut buttons = RECT::default();
-    let mut outer = RECT::default();
-    let mut origin = POINT::default();
-    // SAFETY: these APIs write only live stack values for the retained window.
-    let valid = unsafe {
-        DwmGetWindowAttribute(
-            handle,
-            DWMWA_CAPTION_BUTTON_BOUNDS,
-            (&mut buttons as *mut RECT).cast(),
-            size_of::<RECT>() as u32,
-        )
-        .is_ok()
-            && GetWindowRect(handle, &mut outer).is_ok()
-            && ClientToScreen(handle, &mut origin).as_bool()
-    };
-    if valid && buttons.right > buttons.left {
-        RECT {
-            left: (outer.left + buttons.left - origin.x).max(0),
-            top: 0,
-            right: client.right,
-            bottom: (outer.top + buttons.bottom - origin.y).max(0),
-        }
-    } else {
-        // Reserve the native default until visible geometry becomes available.
-        fallback()
+    let bounds = state.controls.bounds(handle);
+    RECT {
+        left: bounds.left().round() as i32,
+        top: bounds.top().round() as i32,
+        right: bounds.right().round() as i32,
+        bottom: bounds.bottom().round() as i32,
     }
 }
 
@@ -605,11 +458,16 @@ unsafe extern "system" fn caption_proc(
     _: usize,
     data: usize,
 ) -> LRESULT {
-    // SAFETY: registration holds this Rc until same-thread subclass removal.
-    // Only Cell accesses cross reentrant Windows calls; no mutable borrow is retained.
-    let state = unsafe { &*(data as *const CaptionState) };
-    if info::invalidates(message) {
-        state.info.invalidate();
+    // SAFETY: registration owns one Rc on this thread. Retain another for the
+    // whole callback: activation/capture/default processing can reenter winit
+    // and remove the subclass. Only Cells span those calls; never mutable borrows.
+    let callback_state = unsafe {
+        Rc::increment_strong_count(data as *const CaptionState);
+        Rc::from_raw(data as *const CaptionState)
+    };
+    let state = &*callback_state;
+    if let Some(result) = buttons::message(handle, state, message, wparam, lparam) {
+        return result;
     }
     #[cfg(test)]
     if message == WM_SIZE
@@ -748,20 +606,7 @@ unsafe extern "system" fn caption_proc(
                 );
             }
             return LRESULT(1);
-        } else if message == WM_PAINT {
-            let result = DefSubclassProc(handle, message, wparam, lparam);
-            let dc = GetDC(Some(handle));
-            if !dc.is_invalid() {
-                // Only the exposed caption strip uses GDI, never the media surface.
-                let bounds = caption_bounds(handle, state);
-                FillRect(dc, &bounds, HBRUSH(GetStockObject(BLACK_BRUSH).0));
-                ReleaseDC(Some(handle), dc);
-            }
-            return result;
         } else if !state.fullscreen.get() {
-            let mut dwm_result = LRESULT(0);
-            let dwm_handled = matches!(message, WM_NCHITTEST | WM_NCMOUSELEAVE)
-                && DwmDefWindowProc(handle, message, wparam, lparam, &mut dwm_result).as_bool();
             if message == WM_NCCALCSIZE && wparam.0 != 0 {
                 let proposed_top = (*(lparam.0 as *const NCCALCSIZE_PARAMS)).rgrc[0].top;
                 // Retain the native left/right/bottom frame calculation, including
@@ -769,20 +614,29 @@ unsafe extern "system" fn caption_proc(
                 // the close button's invisible outer margin visible as a gap.
                 // The original message pointer is borrowed only for this call.
                 DefSubclassProc(handle, message, wparam, lparam);
-                // DwmDefWindowProc cannot hit-test caption buttons with a non-client
-                // top inset. Keep it zero and expose the hidden strip as UI safe area.
+                // Keep the hidden maximized strip in the existing UI safe-area contract.
+                // Custom controls use the full visible toolbar below it.
                 (*(lparam.0 as *mut NCCALCSIZE_PARAMS)).rgrc[0].top = proposed_top;
                 return LRESULT(0);
             }
             if matches!(message, WM_ACTIVATE | WM_DWMCOMPOSITIONCHANGED) {
                 extend_frame(handle, false);
             }
-            if dwm_handled {
-                return dwm_result;
-            }
             if message == WM_NCHITTEST {
+                let mut control_point = POINT {
+                    x: i32::from(lparam.0 as i16),
+                    y: i32::from((lparam.0 >> 16) as i16),
+                };
+                if ScreenToClient(handle, &mut control_point).as_bool()
+                    && let Some(action) = buttons::hit(handle, state, control_point)
+                {
+                    return LRESULT(buttons::hit_code(action) as isize);
+                }
                 let hit = DefSubclassProc(handle, message, wparam, lparam);
-                if !matches!(hit.0 as u32, HTCLIENT | HTCAPTION) {
+                if !matches!(
+                    hit.0 as u32,
+                    HTCLIENT | HTCAPTION | HTMINBUTTON | HTMAXBUTTON | HTCLOSE
+                ) {
                     return hit;
                 }
                 let mut point = POINT {
@@ -818,18 +672,9 @@ unsafe extern "system" fn caption_proc(
 pub(crate) struct CaptionSurface {
     pub(crate) handle: HWND,
     _parent: Arc<Window>,
-    parent_handle: HWND,
-    state: Rc<CaptionState>,
-    clip: Cell<Option<(u32, u32, Option<RECT>)>>,
 }
 
 impl CaptionSurface {
-    pub(crate) fn refresh_clip(&self, width: u32, height: u32) -> windows::core::Result<()> {
-        let cutout =
-            (!self.state.fullscreen.get()).then(|| caption_bounds(self.parent_handle, &self.state));
-        self.update_clip(width, height, cutout)
-    }
-
     pub(crate) fn new(caption: &NativeCaption) -> windows::core::Result<Self> {
         Self::create(caption, true)
     }
@@ -865,9 +710,6 @@ impl CaptionSurface {
         let surface = Self {
             handle,
             _parent: caption.window.clone(),
-            parent_handle: caption.handle,
-            state: caption.state.clone(),
-            clip: Cell::new(None),
         };
         // SAFETY: callback retains no data and is removed by native child destruction.
         if !unsafe { SetWindowSubclass(handle, Some(surface_proc), SUBCLASS_ID, 0) }.as_bool() {
@@ -888,46 +730,6 @@ impl CaptionSurface {
                 height as i32,
                 SWP_NOZORDER | SWP_NOACTIVATE,
             )?;
-        }
-        self.refresh_clip(width, height)
-    }
-
-    fn update_clip(
-        &self,
-        width: u32,
-        height: u32,
-        cutout: Option<RECT>,
-    ) -> windows::core::Result<()> {
-        let geometry = (width, height, cutout);
-        if self.clip.get() == Some(geometry) {
-            return Ok(());
-        }
-        // SAFETY: the child belongs to this UI thread. Successful SetWindowRgn takes
-        // ownership of its region; temporary and failed regions are deleted here.
-        unsafe {
-            let region = CreateRectRgn(0, 0, width as i32, height as i32);
-            if region.is_invalid() {
-                return Err(windows::core::Error::from_thread());
-            }
-            if let Some(bounds) = cutout {
-                let cutout = CreateRectRgn(bounds.left, bounds.top, bounds.right, bounds.bottom);
-                let combined = CombineRgn(Some(region), Some(region), Some(cutout), RGN_DIFF);
-                let _ = DeleteObject(cutout.into());
-                if combined.0 == 0 {
-                    let _ = DeleteObject(region.into());
-                    return Err(windows::core::Error::from_thread());
-                }
-            }
-            if SetWindowRgn(self.handle, Some(region), true) == 0 {
-                let _ = DeleteObject(region.into());
-                return Err(windows::core::Error::from_thread());
-            }
-            self.clip.set(Some(geometry));
-            // The parent's previous paint may have been clipped by the old child
-            // region. Repaint the newly exposed caption after updating that region.
-            if let Some(bounds) = cutout {
-                let _ = InvalidateRect(Some(self.parent_handle), Some(&bounds), false);
-            }
         }
         Ok(())
     }
@@ -951,7 +753,7 @@ fn top_resize_hit(point: POINT, rect: RECT, border: i32, height: f32) -> Option<
 
 impl Drop for CaptionSurface {
     fn drop(&mut self) {
-        // SAFETY: Rc makes this owner !Send; parent outlives its child. The renderer
+        // SAFETY: the retained HWND is thread-bound; parent outlives its child. The renderer
         // drops its swap chain before this surface and never exposes this handle.
         unsafe {
             let _ = DestroyWindow(self.handle);
@@ -1367,90 +1169,17 @@ mod tests {
                     );
                 }
                 assert_eq!(transitions_disabled(), previous);
-                // Hidden native bounds may be nonempty but are not a visible
-                // caption measurement. Initial layout must use the DPI fallback.
-                // SAFETY: this test owns the hidden window on its event-loop thread.
-                let dpi = unsafe { GetDpiForWindow(handle) } as i32;
-                assert_eq!(
-                    caption.controls_bounds(),
-                    egui::Rect::from_min_max(
-                        egui::pos2((960 - 154 * dpi / 96).max(0) as f32, 0.0),
-                        egui::pos2(960.0, (32 * dpi / 96) as f32),
-                    ),
-                    "hidden windows use the bounded default caption reservation"
-                );
+                let dpi = unsafe { GetDpiForWindow(handle) } as f32 / 96.0;
+                let bounds = caption.controls_bounds();
+                assert!((bounds.width() - 108.0 * dpi).abs() < 1.0);
+                assert!((bounds.height() - 32.0 * dpi).abs() < 1.0);
                 let surface = CaptionSurface::new(&caption).expect("input-transparent child");
-                surface.resize(960, 576).expect("clipped surface");
-                // Exercise late native geometry without resizing the client/child.
-                // Deterministic rectangles isolate region synchronization from DWM timing.
-                for cutout in [
-                    Some(RECT {
-                        left: 840,
-                        top: 0,
-                        right: 960,
-                        bottom: 32,
-                    }),
-                    Some(RECT {
-                        left: 760,
-                        top: 0,
-                        right: 960,
-                        bottom: 40,
-                    }),
-                    Some(RECT {
-                        left: 860,
-                        top: 0,
-                        right: 960,
-                        bottom: 24,
-                    }),
-                    None,
-                ] {
-                    surface
-                        .update_clip(960, 576, cutout)
-                        .expect("late caption clip");
-                    // SAFETY: same-thread hidden test window; owned temporary region,
-                    // scalar geometry queries and no global input or foreign handles.
-                    unsafe {
-                        let region = CreateRectRgn(0, 0, 0, 0);
-                        assert!(!region.is_invalid());
-                        let result =
-                            windows::Win32::Graphics::Gdi::GetWindowRgn(surface.handle, region);
-                        let matches = [
-                            (759, 16),
-                            (780, 36),
-                            (850, 30),
-                            (880, 12),
-                            (959, 39),
-                            (100, 100),
-                        ]
-                        .into_iter()
-                        .all(|(x, y)| {
-                            let expected = cutout.is_none_or(|bounds| {
-                                x < bounds.left
-                                    || x >= bounds.right
-                                    || y < bounds.top
-                                    || y >= bounds.bottom
-                            });
-                            windows::Win32::Graphics::Gdi::PtInRegion(region, x, y).as_bool()
-                                == expected
-                        });
-                        let _ = DeleteObject(region.into());
-                        assert_ne!(result.0, 0);
-                        assert!(matches, "late native cutout is applied: {cutout:?}");
-                        assert!(ValidateRect(Some(handle), None).as_bool());
-                        surface
-                            .update_clip(960, 576, cutout)
-                            .expect("unchanged clip");
-                        assert!(
-                            !windows::Win32::Graphics::Gdi::GetUpdateRect(handle, None, false)
-                                .as_bool(),
-                            "unchanged geometry does not invalidate the parent again"
-                        );
-                    }
-                    assert_eq!(window.inner_size(), winit::dpi::PhysicalSize::new(960, 576));
-                }
-                surface
-                    .refresh_clip(960, 576)
-                    .expect("restore native geometry");
+                surface.resize(960, 576).expect("full client surface");
+                // There is no DWM button cutout, including the last toolbar pixel.
+                let mut child = RECT::default();
+                unsafe { GetClientRect(surface.handle, &mut child) }.expect("child client");
+                assert_eq!((child.right, child.bottom), (960, 576));
+                buttons::tests::verify_native_controls(&caption);
                 caption.set_drag_region(Some(egui::Rect::from_min_max(
                     egui::pos2(250.0, 8.0),
                     egui::pos2(700.0, 32.0),
@@ -1694,16 +1423,13 @@ mod tests {
                                 let size = window.inner_size();
                                 surface
                                     .resize(size.width, size.height)
-                                    .expect("updated caption cutout");
-                                let region = CreateRectRgn(0, 0, 0, 0);
-                                assert!(!region.is_invalid());
-                                assert_ne!(
-                                    windows::Win32::Graphics::Gdi::GetWindowRgn(
-                                        surface.handle,
-                                        region
-                                    )
-                                    .0,
-                                    0
+                                    .expect("updated full client surface");
+                                let mut child = RECT::default();
+                                GetClientRect(surface.handle, &mut child)
+                                    .expect("full client surface");
+                                assert_eq!(
+                                    (child.right, child.bottom),
+                                    (size.width as i32, size.height as i32)
                                 );
                                 eprintln!(
                                     "CAPTION geometry: maximized={maximized} density={} inset={} reserved={:?}",
@@ -1777,19 +1503,11 @@ mod tests {
                                                 egui::vec2(size.width as f32, size.height as f32)
                                             ))
                                         ),
-                                        "the child cutout must not cover native buttons"
+                                        "the full client surface includes every custom control"
                                     );
                                     let center = button.bounds.center();
-                                    for y in [center.y, button.bounds.bottom() - 1.0] {
-                                        assert!(
-                                            !windows::Win32::Graphics::Gdi::PtInRegion(
-                                                region,
-                                                center.x as i32,
-                                                y as i32
-                                            )
-                                            .as_bool()
-                                        );
-                                    }
+                                    assert!(center.x < child.right as f32);
+                                    assert!(button.bounds.bottom() <= child.bottom as f32);
                                     let packed = u32::from((origin.x + center.x as i32) as u16)
                                         | (u32::from((origin.y + center.y as i32) as u16) << 16);
                                     let expected = match button.action {
@@ -1808,7 +1526,6 @@ mod tests {
                                         expected as isize
                                     );
                                 }
-                                let _ = DeleteObject(region.into());
                                 let windowed_size = window.inner_size();
                                 let windowed_position = window.outer_position().expect("position");
                                 // Capture every synchronous client size, not just the
@@ -1903,35 +1620,22 @@ mod tests {
                                 let mut client = RECT::default();
                                 GetClientRect(handle, &mut client).expect("hidden client");
                                 let dpi = GetDpiForWindow(handle) as i32;
-                                let expected = RECT {
-                                    left: (client.right - 154 * dpi / 96).max(0),
-                                    top: 0,
-                                    right: client.right,
-                                    bottom: 32 * dpi / 96,
-                                };
-                                assert_eq!(caption_bounds(handle, &caption.state), expected);
-                                surface
-                                    .refresh_clip(client.right as u32, client.bottom as u32)
-                                    .expect("hidden/minimized clip");
-                                assert_eq!(
-                                    surface.clip.get(),
-                                    Some((
-                                        client.right as u32,
-                                        client.bottom as u32,
-                                        Some(expected)
-                                    ))
+                                let bounds = caption.controls_bounds();
+                                // A minimized client can be narrower than the controls.
+                                let width =
+                                    (108.0 * dpi as f32 / 96.0).min(client.right.max(0) as f32);
+                                assert!(
+                                    (bounds.width() - width).abs() < 1.0,
+                                    "hidden/minimized bounds {bounds:?}, client {client:?}, dpi {dpi}"
                                 );
-                                eprintln!(
-                                    "PASS caption fallback: dpi={dpi} minimized={} bounds={expected:?}",
-                                    IsIconic(handle).as_bool()
-                                );
+                                assert!((bounds.right() - client.right as f32).abs() < 1.0);
                                 let _ = ShowWindow(handle, SW_SHOWNORMAL);
                             }
                         }
                         let _ = ShowWindow(handle, SW_HIDE);
                     }
                     let state = caption.state.clone();
-                    assert_eq!(Rc::strong_count(&state), 4);
+                    assert_eq!(Rc::strong_count(&state), 3);
                     drop(surface);
                     assert_eq!(Rc::strong_count(&state), 3);
                     caption.verification_size_move(true);

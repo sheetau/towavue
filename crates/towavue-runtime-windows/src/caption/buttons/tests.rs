@@ -86,5 +86,29 @@ pub(in crate::caption) fn verify_native_controls(caption: &NativeCaption) {
             }
         }
     }
+    // System-menu state can lag behind maximize/restore. It must not disable
+    // our independently painted control or suppress its next queued command.
+    // SAFETY: change only this owned fixture window and restore each native flag.
+    unsafe {
+        let menu = GetSystemMenu(handle, false);
+        let previous = EnableMenuItem(menu, SC_MAXIMIZE, MF_BYCOMMAND | MF_GRAYED);
+        assert!(enabled(handle, CaptionAction::ToggleMaximize));
+        assert!(caption.accessible_buttons(Language::English)[1].enabled);
+        let _ = EnableMenuItem(
+            menu,
+            SC_MAXIMIZE,
+            MENU_ITEM_FLAGS(previous.0 as u32) | MF_BYCOMMAND,
+        );
+        let was_enabled = windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow(handle, false);
+        assert!(!enabled(handle, CaptionAction::ToggleMaximize));
+        assert!(!caption.accessible_buttons(Language::English)[1].enabled);
+        if !was_enabled.as_bool() {
+            let _ = windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow(handle, true);
+        }
+        let style = GetWindowLongPtrW(handle, GWL_STYLE);
+        SetWindowLongPtrW(handle, GWL_STYLE, style & !(WS_MAXIMIZEBOX.0 as isize));
+        assert!(!enabled(handle, CaptionAction::ToggleMaximize));
+        SetWindowLongPtrW(handle, GWL_STYLE, style);
+    }
     caption.state.controls.layout.set(None);
 }

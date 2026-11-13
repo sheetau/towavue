@@ -4127,6 +4127,13 @@ where
                 && self.pending_time.is_none()
                 && !self.audio_drained,
         );
+        if let Some(caption) = &self.native_caption {
+            // The modal move loop does not run AboutToWait. Retain playback/UI
+            // updates without continuously repainting a stationary image.
+            let playback = (self.state == PlaybackState::Playing)
+                .then(|| Instant::now() + Duration::from_millis(10));
+            caption.set_move_redraw_deadline(self.ui_repaint_at.into_iter().chain(playback).min());
+        }
         #[cfg(feature = "presentation-verification")]
         if trace_frame {
             self.trace_burst(
@@ -5798,7 +5805,7 @@ where
                     egui::pos2(root.max_rect().right() - controls_width, layout.drag_top),
                     egui::pos2(
                         root.max_rect().right(),
-                        root.max_rect().top() + layout.height,
+                        root.max_rect().top() + layout.height - 1.0 / density,
                     ),
                 ) * density,
             );
@@ -6574,13 +6581,12 @@ where
                 });
             });
         let loading = self.toolbar_loading(root.ctx());
-        let mut progress_bounds = panel.response.rect;
-        if self.native_caption.is_some() {
-            // The toolbar's separator/progress pixel must not cover custom controls.
-            progress_bounds.max.x =
-                (progress_bounds.right() - controls_width).max(progress_bounds.left());
-        }
-        export_progress::draw(root, progress_bounds, self.active_export.as_mut(), loading);
+        export_progress::draw(
+            root,
+            panel.response.rect,
+            self.active_export.as_mut(),
+            loading,
+        );
         self.prepare_image_tab(image_preparation_target);
         if let Some(tab) = playback_preparation_target {
             self.prepare_playback_tab(tab);

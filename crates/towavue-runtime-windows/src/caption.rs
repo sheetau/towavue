@@ -55,6 +55,7 @@ struct CaptionState {
     fullscreen: Cell<bool>,
     sizing: Cell<bool>,
     move_size_timer: Cell<bool>,
+    move_redraw_deadline: Cell<Option<std::time::Instant>>,
     #[cfg(test)]
     move_size_redraws: Cell<usize>,
     changing_dpi: Cell<bool>,
@@ -79,6 +80,12 @@ pub struct NativeCaption {
 }
 
 impl NativeCaption {
+    /// Mirror the next visual update while Windows owns the modal move/size loop.
+    /// None keeps a static client idle; explicit input/resize redraws remain independent.
+    pub fn set_move_redraw_deadline(&self, deadline: Option<std::time::Instant>) {
+        self.state.move_redraw_deadline.set(deadline);
+    }
+
     /// Consume coalesced system time/settings notifications on the window thread.
     /// The native callback only marks state and schedules paint, never queries files.
     pub fn take_time_settings_changed(&self) -> bool {
@@ -199,6 +206,7 @@ impl NativeCaption {
             fullscreen: Cell::new(false),
             sizing: Cell::new(false),
             move_size_timer: Cell::new(false),
+            move_redraw_deadline: Cell::new(None),
             #[cfg(test)]
             move_size_redraws: Cell::new(0),
             changing_dpi: Cell::new(false),
@@ -516,8 +524,13 @@ unsafe extern "system" fn caption_proc(
                 && state.move_size_timer.get()
                 && !state.fullscreen.get()
                 && !state.changing_dpi.get()
+                && state
+                    .move_redraw_deadline
+                    .get()
+                    .is_some_and(|due| due <= std::time::Instant::now())
                 && let Some(window) = state.window.upgrade()
             {
+                state.move_redraw_deadline.set(None);
                 #[cfg(test)]
                 state
                     .move_size_redraws
@@ -964,6 +977,13 @@ mod tests {
             caption.verification_size_move(true);
             assert!(caption.state.move_size_timer.get(), "real timer creation");
             let before = requests();
+            caption.set_move_redraw_deadline(None);
+            dispatch_tick();
+            assert_eq!(requests(), before, "static dragging must not repaint");
+            caption.set_move_redraw_deadline(Some(Instant::now() + Duration::from_secs(60)));
+            dispatch_tick();
+            assert_eq!(requests(), before, "future UI deadlines must wait");
+            caption.set_move_redraw_deadline(Some(Instant::now()));
             let start = Instant::now();
             while requests() < before + 3 && start.elapsed() < Duration::from_secs(1) {
                 // Pump real HWND timer messages without running winit's outer
@@ -982,6 +1002,10 @@ mod tests {
                     {
                         assert_eq!(message.wParam.0, MOVE_SIZE_TIMER_ID);
                         DispatchMessageW(&message);
+                        let sent = requests();
+                        dispatch_tick();
+                        assert_eq!(requests(), sent, "one scheduled frame cannot flood paints");
+                        caption.set_move_redraw_deadline(Some(Instant::now()));
                     }
                 }
                 std::thread::sleep(Duration::from_millis(1));
@@ -1172,7 +1196,7 @@ mod tests {
                 let dpi = unsafe { GetDpiForWindow(handle) } as f32 / 96.0;
                 let bounds = caption.controls_bounds();
                 assert!((bounds.width() - 108.0 * dpi).abs() < 1.0);
-                assert!((bounds.height() - 32.0 * dpi).abs() < 1.0);
+                assert!((bounds.height() - (32.0 * dpi - 1.0)).abs() < 1.0);
                 let surface = CaptionSurface::new(&caption).expect("input-transparent child");
                 surface.resize(960, 576).expect("full client surface");
                 // There is no DWM button cutout, including the last toolbar pixel.

@@ -65,7 +65,7 @@ impl State {
             };
             egui::Rect::from_min_max(
                 egui::pos2((client.right as f32 - 108.0 * scale).max(0.0), top),
-                egui::pos2(client.right as f32, top + 32.0 * scale),
+                egui::pos2(client.right as f32, top + 32.0 * scale - 1.0),
             )
         }
     }
@@ -121,25 +121,21 @@ fn command(handle: HWND, action: CaptionAction) -> u32 {
 }
 
 fn enabled(handle: HWND, action: CaptionAction) -> bool {
-    // SAFETY: scalar style/menu queries. GetSystemMenu retains ownership of its handle.
+    // The system menu caches disabled Restore/Maximize flags until it is opened.
+    // It is not the capability source for independently drawn caption controls.
+    // SAFETY: scalar queries of the retained same-thread window.
     unsafe {
         if !IsWindowEnabled(handle).as_bool() {
             return false;
         }
         let style = WINDOW_STYLE(GetWindowLongPtrW(handle, GWL_STYLE) as u32);
-        let permitted = match action {
+        match action {
             CaptionAction::Minimize => style.contains(WS_MINIMIZEBOX),
             CaptionAction::ToggleMaximize => style.contains(WS_MAXIMIZEBOX),
             CaptionAction::Close => {
                 GetClassLongPtrW(handle, GCL_STYLE) & CS_NOCLOSE.0 as usize == 0
             }
-        };
-        let flags = GetMenuState(
-            GetSystemMenu(handle, false),
-            command(handle, action),
-            MF_BYCOMMAND,
-        );
-        permitted && (flags == u32::MAX || flags & (MF_DISABLED.0 | MF_GRAYED.0) == 0)
+        }
     }
 }
 

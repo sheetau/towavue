@@ -12,8 +12,10 @@ fn controls(scale: f32, maximized: bool) -> Vec<CaptionButton> {
     .map(|(index, action)| CaptionButton {
         action,
         label: "Caption control",
-        bounds: Rect::from_min_size(egui::pos2(index as f32 * 36.0, top), egui::vec2(36.0, 32.0))
-            * scale,
+        bounds: Rect::from_min_size(
+            egui::pos2(index as f32 * 36.0 * scale, top * scale),
+            egui::vec2(36.0 * scale, 32.0 * scale - 1.0),
+        ),
         enabled: true,
         hovered: action == CaptionAction::Close,
         pressed: false,
@@ -34,6 +36,13 @@ fn frame(context: &egui::Context, density: f32, maximized: bool) -> egui::FullOu
         .native_pixels_per_point = Some(density);
     context.run_ui(input, |ui| {
         caption_controls(ui, &controls(density, maximized));
+        let bottom = if maximized { 40.0 } else { 32.0 };
+        crate::export_progress::draw(
+            ui,
+            Rect::from_min_max(Pos2::ZERO, egui::pos2(128.0, bottom)),
+            None,
+            None,
+        );
     })
 }
 
@@ -96,10 +105,10 @@ fn caption_icons_use_the_segoe_glyphs_and_fill_the_toolbar_at_each_density() {
 
 #[test]
 #[ignore = "requires hidden hardware D3D11; generated caption pixel readbacks"]
-fn caption_controls_reach_gpu_through_the_last_toolbar_pixel() {
+fn caption_controls_stop_above_toolbar_separator() {
     use winit::platform::windows::EventLoopBuilderExtWindows;
     let Some(root) = crate::tests::isolated_test_root(
-        "chrome::caption::tests::caption_controls_reach_gpu_through_the_last_toolbar_pixel",
+        "chrome::caption::tests::caption_controls_stop_above_toolbar_separator",
     ) else {
         return;
     };
@@ -150,15 +159,22 @@ fn caption_controls_reach_gpu_through_the_last_toolbar_pixel() {
                     let x = (73.0 * density) as usize;
                     for y in [
                         (top * density) as usize,
-                        ((top + 32.0) * density) as usize - 1,
+                        ((top + 32.0) * density) as usize - 2,
                     ] {
                         let offset = (y * width as usize + x) * 4;
                         assert_eq!(
                             &pixels[offset..offset + 3],
                             &[232, 17, 32],
-                            "full-height hover including last pixel"
+                            "hover reaches the pixel immediately above the separator"
                         );
                     }
+                    let separator =
+                        (((top + 32.0) * density) as usize - 1) * width as usize * 4 + x * 4;
+                    assert_eq!(
+                        &pixels[separator..separator + 3],
+                        &BORDER.to_array()[..3],
+                        "one physical separator pixel remains visible"
+                    );
                     std::fs::write(
                         output_dir.join(format!("caption-{maximized}-{width}x{height}.rgba")),
                         pixels,

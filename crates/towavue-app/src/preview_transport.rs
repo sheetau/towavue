@@ -101,7 +101,7 @@ impl Transport {
             ui.painter().rect_filled(
                 rect,
                 crate::chrome::RADIUS_XS,
-                Color32::from_black_alpha(160),
+                crate::chrome::TRANSLUCENT_BLACK,
             );
         }
         let mut action = None;

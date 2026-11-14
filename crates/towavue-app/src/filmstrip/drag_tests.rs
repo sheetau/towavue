@@ -1516,7 +1516,7 @@ fn gpu_filmstrip_refresh_completions_preserve_displayed_pixels() {
                                 .iter()
                                 .find_map(|shape| match &shape.shape {
                                     egui::Shape::Rect(rect)
-                                        if rect.fill == Color32::from_black_alpha(191) =>
+                                        if rect.fill == Color32::from_black_alpha(204) =>
                                     {
                                         Some(rect.rect)
                                     }
@@ -2230,7 +2230,7 @@ fn filmstrip_media_bounds_own_dimming_wheel_and_scrollbar_without_dragging_cards
     assert!(bounds.y1 <= f64::from(media.bottom() - 8.0));
     assert!((bounds.height() - 32.0).abs() < 0.01);
     assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
-        egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(191) && rect.rect == media
+        egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(204) && rect.rect == media
     )), "75% dim stays inside the media panel");
     assert!(
         output.shapes.iter().any(|shape| matches!(&shape.shape,
@@ -2330,7 +2330,7 @@ fn filmstrip_media_bounds_own_dimming_wheel_and_scrollbar_without_dragging_cards
                     .shapes
                     .iter()
                     .filter_map(|shape| match &shape.shape {
-                        egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(191) => {
+                        egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(204) => {
                             Some(rect.rect)
                         }
                         _ => None,
@@ -2473,7 +2473,7 @@ fn filmstrip_clicks_dismiss_and_background_open_preserves_the_current_edit() {
                 assert!(app.filmstrip_open);
                 assert!(
                     output.shapes.iter().any(|shape| matches!(&shape.shape,
-                        egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(191)
+                        egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(204)
                     )),
                     "filmstrip remains drawn after background opening"
                 );

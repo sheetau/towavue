@@ -48,7 +48,7 @@ fn audio_buttons_are_visible_from_the_source_tab_without_a_dark_backdrop() {
         }
         assert!(
             !output.shapes.iter().any(|shape| matches!(&shape.shape,
-            egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(160))),
+            egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(128))),
             "audio controls have no thumbnail backdrop"
         );
     }

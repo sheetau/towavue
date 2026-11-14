@@ -1617,7 +1617,7 @@ fn toolbar_magnetism_detaches_over_media_and_dims_the_whole_source_tab() {
             label.max + egui::vec2(chrome::TAB_CLOSE_WIDTH, 0.0),
         );
         assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
-            egui::Shape::Rect(rect) if rect.rect == expected && rect.fill == egui::Color32::from_black_alpha(127))),
+            egui::Shape::Rect(rect) if rect.rect == expected && rect.fill == egui::Color32::from_black_alpha(128))),
             "group opacity includes the close slot, not only the drag label");
         let (_, actions) = frame(&mut app, size, true, vec![pointer(body, false)]);
         assert!(
@@ -1626,7 +1626,7 @@ fn toolbar_magnetism_detaches_over_media_and_dims_the_whole_source_tab() {
         let (output, actions) = frame(&mut app, size, true, vec![]);
         assert!(actions.is_empty());
         assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
-            egui::Shape::Rect(rect) if rect.rect == expected && rect.fill == egui::Color32::from_black_alpha(127))));
+            egui::Shape::Rect(rect) if rect.rect == expected && rect.fill == egui::Color32::from_black_alpha(128))));
     }
 }
 

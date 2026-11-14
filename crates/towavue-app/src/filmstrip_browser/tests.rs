@@ -1477,11 +1477,15 @@ fn browser_menus_expand_after_loading_align_labels_and_retain_address_input() {
             })
             .expect("filter text");
         assert_eq!(
-            text.galley.job.sections[0].format.color,
+            if text.galley.job.sections[0].format.color == egui::Color32::PLACEHOLDER {
+                text.fallback_color
+            } else {
+                text.galley.job.sections[0].format.color
+            },
             if label == "All" {
                 chrome::FOREGROUND
             } else {
-                chrome::MUTED
+                chrome::FAINT
             }
         );
     }
@@ -1508,7 +1512,7 @@ fn browser_menus_expand_after_loading_align_labels_and_retain_address_input() {
     for _ in 0..3 {
         output = frame(&context, &mut browser, size, vec![]).0;
     }
-    assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(191))), "text header has no dimming band");
+    assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(204))), "text header has no dimming band");
 }
 
 #[test]
@@ -2081,7 +2085,7 @@ fn browser_search_retains_media_focus_and_filtered_tab_traversal_uses_paths() {
         .iter()
         .position(|shape| {
             matches!(&shape.shape,
-        egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(191))
+        egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(204))
         })
         .expect("backdrop");
     let search_paint = output

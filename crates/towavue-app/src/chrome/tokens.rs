@@ -15,6 +15,10 @@ pub const BORDER: Color32 = SURFACE;
 pub const TRACK: Color32 = DISABLED;
 pub const SURFACE_HOVER: Color32 = SURFACE;
 
+pub const MODAL_BACKDROP: Color32 = Color32::from_black_alpha(102);
+pub const TRANSLUCENT_BLACK: Color32 = Color32::from_black_alpha(128);
+pub const FILMSTRIP_BACKDROP: Color32 = Color32::from_black_alpha(204);
+
 pub const RADIUS_XS: u8 = 3;
 pub const RADIUS_SM: u8 = 6;
 pub const TEXT_SM: f32 = 9.0;

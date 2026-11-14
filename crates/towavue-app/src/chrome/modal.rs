@@ -151,7 +151,7 @@ pub fn modal(context: &Context, id: Id, preview: bool) -> egui::Modal {
     if preview {
         modal.backdrop_color(egui::Color32::TRANSPARENT)
     } else {
-        modal
+        modal.backdrop_color(super::MODAL_BACKDROP)
     }
 }
 

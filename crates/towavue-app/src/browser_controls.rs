@@ -372,7 +372,7 @@ pub(super) fn filters(
                 color: if selected {
                     crate::chrome::FOREGROUND
                 } else {
-                    crate::chrome::MUTED
+                    Color32::PLACEHOLDER
                 },
                 ..Default::default()
             },
@@ -390,7 +390,14 @@ pub(super) fn filters(
                 ..Default::default()
             },
         );
-        let response = crate::status_bar::item_at(ui, slot, job, !selected);
+        let response = crate::status_bar::item_at_tinted(
+            ui,
+            slot,
+            job,
+            !selected,
+            crate::chrome::FAINT,
+            crate::chrome::MUTED,
+        );
         response.widget_info(|| {
             egui::WidgetInfo::selected(
                 egui::WidgetType::Button,

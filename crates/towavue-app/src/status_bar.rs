@@ -43,6 +43,25 @@ pub(super) fn item_at(
     label: impl Into<egui::WidgetText>,
     clickable: bool,
 ) -> egui::Response {
+    item_at_tinted(
+        ui,
+        rect,
+        label,
+        clickable,
+        chrome::MUTED,
+        chrome::FOREGROUND,
+    )
+}
+
+/// Apply state colors only to placeholder text; explicit count/accent colors stay fixed.
+pub(super) fn item_at_tinted(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    label: impl Into<egui::WidgetText>,
+    clickable: bool,
+    idle_color: egui::Color32,
+    hot_color: egui::Color32,
+) -> egui::Response {
     let label = label.into();
     let text = label.text().to_owned();
     let galley = label.into_galley(
@@ -92,11 +111,7 @@ pub(super) fn item_at(
     if hot {
         painter.rect_filled(rect, chrome::RADIUS_XS, chrome::ACTIVE_TAB);
     }
-    let color = if hot {
-        chrome::FOREGROUND
-    } else {
-        chrome::MUTED
-    };
+    let color = if hot { hot_color } else { idle_color };
     painter.galley(
         egui::pos2(
             if ui.layout().main_dir() == egui::Direction::RightToLeft {

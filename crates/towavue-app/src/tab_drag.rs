@@ -217,7 +217,7 @@ impl Layout {
         // overlapping primitive's alpha separately or copying a GPU surface.
         if let Some(rect) = self.source_rect {
             ui.painter_at(strip)
-                .rect_filled(rect, 3.0, egui::Color32::from_black_alpha(127));
+                .rect_filled(rect, 3.0, crate::chrome::TRANSLUCENT_BLACK);
         }
         if let Some(drag) = &self.state.drag {
             if drag.crossed

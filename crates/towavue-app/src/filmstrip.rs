@@ -1288,7 +1288,7 @@ impl Filmstrip {
                 // and filters are sibling sublayers, always above this dimming.
                 ui.painter()
                     .with_clip_rect(backdrop.intersect(context.content_rect()))
-                    .rect_filled(backdrop, 0.0, Color32::from_black_alpha(191));
+                    .rect_filled(backdrop, 0.0, crate::chrome::FILMSTRIP_BACKDROP);
                 ui.set_clip_rect(screen);
                 ui.set_min_size(screen.size());
                 ui.set_max_size(screen.size());

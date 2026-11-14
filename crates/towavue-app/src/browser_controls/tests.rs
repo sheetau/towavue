@@ -157,6 +157,13 @@ fn filter_labels_and_counts_share_the_baseline_and_omit_absent_kinds() {
             assert!((label.pos.y - text("All 123").pos.y).abs() <= 1.0 / density);
             assert!(label.pos.x > right);
         }
+        let image = text("Image 100");
+        assert_eq!(image.fallback_color, crate::chrome::FAINT);
+        assert_eq!(
+            image.galley.job.sections[1].format.color,
+            crate::chrome::DISABLED
+        );
+        let hover = image.pos + image.galley.size() * 0.5;
         let all = text("All 123");
         assert_eq!(
             all.galley.job.sections[0].format.color,
@@ -178,6 +185,35 @@ fn filter_labels_and_counts_share_the_baseline_and_omit_absent_kinds() {
         assert_eq!(
             visible_filters(&[12, 12, 0, 0]),
             [false, true, false, false]
+        );
+        let hovered = context.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::PointerMoved(hover)],
+                ..Default::default()
+            },
+            |ui| {
+                let values = [123, 100, 23, 0];
+                let size = filter_size(ui, &values);
+                filters(
+                    ui,
+                    Rect::from_min_size(egui::pos2(20.0, 20.0), size),
+                    &values,
+                    &mut None,
+                );
+            },
+        );
+        let image = hovered
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "Image 100" => Some(text),
+                _ => None,
+            })
+            .expect("hovered filter");
+        assert_eq!(image.fallback_color, crate::chrome::MUTED);
+        assert_eq!(
+            image.galley.job.sections[1].format.color,
+            crate::chrome::DISABLED
         );
     }
 }

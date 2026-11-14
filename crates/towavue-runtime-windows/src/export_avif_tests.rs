@@ -1022,6 +1022,7 @@ fn avif_animation_export_preserves_all_frames() {
                 kind: MediaKind::Image,
                 operations,
                 hardware_encode: false,
+                video_track: None,
             };
             export_media(&request).expect("save");
             if request.operations.is_empty() {
@@ -1113,6 +1114,7 @@ fn request(source: &Path, target: &Path) -> ExportRequest {
         kind: MediaKind::Image,
         operations: vec![],
         hardware_encode: false,
+        video_track: None,
     }
 }
 

@@ -39,6 +39,7 @@ fn output(request: &ExportDialogRequest, target: &Path) {
             kind: request.kind,
             operations: request.operations.clone(),
             hardware_encode: false,
+            video_track: None,
         },
         request.options.clone(),
     )

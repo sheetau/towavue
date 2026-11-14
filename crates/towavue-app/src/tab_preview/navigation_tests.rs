@@ -226,6 +226,7 @@ fn audio_card_is_compact_and_keeps_controls_stationary_without_artwork() {
         let mut frame = |preview: &mut TabPreview, stage, events| {
             time += 0.01;
             let target = Target {
+                track: None,
                 tab: id,
                 path: if stage == 0 { "first.wav" } else { "next.wav" }.into(),
                 kind: MediaKind::Audio,
@@ -403,6 +404,7 @@ fn image_cards_keep_the_viewport_across_aspect_changes_pending_and_reading() {
         let tab = tabs.open_new("image.png".into(), MediaKind::Image);
         let preview = TabPreview::new().expect("worker");
         let target = Target {
+            track: None,
             tab,
             path: "image.png".into(),
             kind: MediaKind::Image,

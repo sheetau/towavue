@@ -7,6 +7,7 @@ fn request(expected: &FileOperationSource, original: &RetainedSource) -> ExportR
         kind: MediaKind::Image,
         operations: vec![EditOperation::FlipHorizontal],
         hardware_encode: false,
+        video_track: None,
     }
 }
 
@@ -166,6 +167,7 @@ fn deleted_audio_and_video_recreate_edits_and_video_restarts_from_retained_bytes
                     kind,
                     operations: Vec::new(),
                     hardware_encode: true,
+                    video_track: None,
                 },
                 ExportOptions::default(),
                 &AtomicBool::new(false),
@@ -231,6 +233,7 @@ fn deleted_audio_and_video_recreate_edits_and_video_restarts_from_retained_bytes
                     kind,
                     operations,
                     hardware_encode: false,
+                    video_track: None,
                 },
                 ExportOptions::default(),
                 &AtomicBool::new(false),

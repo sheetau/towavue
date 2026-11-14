@@ -630,6 +630,7 @@ mod tests {
                 kind: MediaKind::Audio,
                 operations,
                 hardware_encode: false,
+                video_track: None,
             })
             .expect("independent exported PCM");
             let mut amplitudes = Vec::new();

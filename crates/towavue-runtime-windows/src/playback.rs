@@ -149,6 +149,8 @@ pub struct PlaybackSession {
     notify: Arc<dyn Fn(PlaybackEvent) + Send + Sync>,
     audio_format: Option<AudioFormat>,
     audio_tracks: AudioTrackCatalog,
+    video_tracks: towavue_core::VideoTrackCatalog,
+    video_track: Option<towavue_core::VideoTrackId>,
     subtitle_tracks: Vec<towavue_core::SubtitleTrack>,
     audio_selection: AudioTrackSelection,
     audio_output: towavue_core::AudioTrackOutput,
@@ -230,7 +232,35 @@ impl PlaybackSession {
         audio_output: towavue_core::AudioTrackOutput,
         notify: impl Fn(PlaybackEvent) + Send + Sync + 'static,
     ) -> Result<Self, PlaybackError> {
-        let mut session = Self::open_with_audio(
+        Self::open_input_with_tracks(
+            input,
+            graphics_device,
+            volume,
+            rate,
+            range,
+            paused,
+            selection,
+            audio_output,
+            None,
+            notify,
+        )
+    }
+
+    /// Select the source's timed video and audio before starting either feed.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_input_with_tracks(
+        input: crate::MediaInput,
+        graphics_device: GraphicsDevice,
+        volume: f32,
+        rate: f32,
+        range: PlaybackRange,
+        paused: bool,
+        selection: AudioTrackSelection,
+        audio_output: towavue_core::AudioTrackOutput,
+        video_track: Option<towavue_core::VideoTrackId>,
+        notify: impl Fn(PlaybackEvent) + Send + Sync + 'static,
+    ) -> Result<Self, PlaybackError> {
+        let mut session = Self::open_with_tracks(
             input.path(),
             graphics_device,
             volume,
@@ -239,6 +269,7 @@ impl PlaybackSession {
             paused,
             selection,
             audio_output,
+            video_track,
             notify,
         )?;
         session.input_owner = Some(input);
@@ -319,6 +350,33 @@ impl PlaybackSession {
         audio_output: towavue_core::AudioTrackOutput,
         notify: impl Fn(PlaybackEvent) + Send + Sync + 'static,
     ) -> Result<Self, PlaybackError> {
+        Self::open_with_tracks(
+            path,
+            graphics_device,
+            volume,
+            rate,
+            range,
+            paused,
+            selection,
+            audio_output,
+            None,
+            notify,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn open_with_tracks(
+        path: &Path,
+        graphics_device: GraphicsDevice,
+        volume: f32,
+        rate: f32,
+        range: PlaybackRange,
+        paused: bool,
+        selection: AudioTrackSelection,
+        audio_output: towavue_core::AudioTrackOutput,
+        video_track: Option<towavue_core::VideoTrackId>,
+        notify: impl Fn(PlaybackEvent) + Send + Sync + 'static,
+    ) -> Result<Self, PlaybackError> {
         // Capture before probing/starting decoders, never at Save time. Viewing
         // unsupported file identities (e.g. symlinks) remains available.
         let source = crate::FileOperationSource::capture(path).ok();
@@ -332,8 +390,9 @@ impl PlaybackSession {
             source_video_grid_rate,
             source_video_grid_origin,
             audio_tracks,
+            video_tracks,
             subtitle_tracks,
-        } = decode::probe_playback_formats(path, selected)?;
+        } = decode::probe_playback_formats_with_video(path, selected, video_track)?;
         let adapter_luid = graphics_device.adapter_luid();
         let metrics = Arc::new(SharedMetrics {
             hardware_frame_count: AtomicU64::new(0),
@@ -349,6 +408,8 @@ impl PlaybackSession {
             notify: Arc::new(notify),
             audio_format,
             audio_tracks,
+            video_tracks,
+            video_track,
             subtitle_tracks,
             audio_selection: selection,
             audio_output: Default::default(),
@@ -487,6 +548,38 @@ impl PlaybackSession {
 
     pub fn rate(&self) -> f32 {
         self.rate
+    }
+
+    pub fn video_tracks(&self) -> &towavue_core::VideoTrackCatalog {
+        &self.video_tracks
+    }
+
+    pub fn video_selection(&self) -> Option<towavue_core::VideoTrackId> {
+        self.video_track
+    }
+
+    /// Prepare the caller's immediately following seek. Validate first, then
+    /// discard the old picture; a previous track must never become a seek hold.
+    /// The seek joins existing feeds before selecting a new worker-owned input.
+    pub fn configure_video_track(
+        &mut self,
+        track: Option<towavue_core::VideoTrackId>,
+    ) -> Result<(), PlaybackError> {
+        if self.video_track == track {
+            return Ok(());
+        }
+        let formats =
+            decode::probe_playback_formats_with_video(&self.path, self.audio_track(), track)?;
+        self.video_track = track;
+        self.video_tracks = formats.video_tracks;
+        self.source_video_frame_rate = formats.source_video_frame_rate;
+        self.source_video_grid_rate = formats.source_video_grid_rate;
+        self.source_video_grid_origin = formats.source_video_grid_origin;
+        self.current_video = None;
+        self.current_video_source = None;
+        self.current_video_unpresented = false;
+        self.recovery_frame = None;
+        Ok(())
     }
 
     pub fn audio_tracks(&self) -> &AudioTrackCatalog {
@@ -979,16 +1072,22 @@ impl PlaybackSession {
         self.video_cancel = Arc::new(AtomicBool::new(false));
         let cancelled = Arc::clone(&self.video_cancel);
         let completion = Arc::clone(&self.completion);
+        let video_track = self.video_track;
         let mut input = self.video_input.take();
         let timeline = self.timeline.clone();
         let video_thread = thread::Builder::new()
             .name("towavue-video-feed".to_owned())
             .spawn(move || {
                 let result = (|| {
-                    if input.is_none() {
-                        input = Some(decode::ParallelInput::open_tracked_video(&path, &|| {
-                            cancelled.load(Ordering::Relaxed)
-                        })?);
+                    if input
+                        .as_ref()
+                        .is_none_or(|input| !input.matches_video_track(video_track))
+                    {
+                        input = Some(decode::ParallelInput::open_tracked_video_track(
+                            &path,
+                            video_track,
+                            &|| cancelled.load(Ordering::Relaxed),
+                        )?);
                     }
                     if let Some(plan) = timeline {
                         for segment in timeline::segments(&plan, target, true, end) {
@@ -1245,6 +1344,7 @@ impl PlaybackSession {
         Some(crate::VideoFrameSnapshot {
             time: self.current_source_video_time()?,
             source: Arc::clone(self.current_video_source.as_ref()?),
+            track: self.video_track.or(self.video_tracks.preferred),
         })
     }
 

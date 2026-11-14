@@ -89,6 +89,54 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         );
     }
 
+    pub(super) fn audio_track_controls_width(&self, ui: &egui::Ui) -> f32 {
+        if !self.timeline_is_visible() || self.media_kind != Some(MediaKind::Video) {
+            return 0.0;
+        }
+        let Some(catalog) = self
+            .session
+            .as_ref()
+            .map(PlaybackSession::audio_tracks)
+            .filter(|catalog| !catalog.tracks.is_empty())
+        else {
+            return 0.0;
+        };
+        let selected = match self.audio_selection() {
+            AudioTrackSelection::Default => catalog.preferred,
+            AudioTrackSelection::Track(id) => Some(id),
+            AudioTrackSelection::All => None,
+        };
+        let label = if self.audio_selection() == AudioTrackSelection::All {
+            "All".to_owned()
+        } else {
+            format!(
+                "A{}",
+                catalog
+                    .tracks
+                    .iter()
+                    .position(|track| Some(track.id) == selected)
+                    .unwrap_or(0)
+                    + 1
+            )
+        };
+        let text = ui
+            .painter()
+            .layout_no_wrap(
+                label,
+                egui::FontId::proportional(chrome::TEXT_LG),
+                chrome::MUTED,
+            )
+            .size()
+            .x;
+        text + if catalog.tracks.len() > 1 {
+            18.0 + 2.0
+        } else {
+            5.0
+        } + 16.0
+            + 10.0
+            + chrome::STATUS_BUTTON_GAP
+    }
+
     pub(super) fn draw_audio_track_controls(&self, ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
         if !self.timeline_is_visible() || self.media_kind != Some(MediaKind::Video) {
             return;

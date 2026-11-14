@@ -478,14 +478,19 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 Err(error) => self.finish_metadata_read(token, Err(error.to_string())),
             }
         }
+        let video_track = self.video_selection();
         if let Some(worker) = &self.metadata_worker {
             let notify = Arc::clone(&self.notify);
             worker.submit(move |cancellation| {
                 if cancellation.is_cancelled() {
                     return;
                 }
-                let result = towavue_runtime_windows::read_export_metadata(input.path(), kind)
-                    .map_err(|error| error.message(display_language));
+                let result = towavue_runtime_windows::read_export_metadata_for_track(
+                    input.path(),
+                    kind,
+                    video_track,
+                )
+                .map_err(|error| error.message(display_language));
                 if !cancellation.is_cancelled() {
                     notify(AppEvent::MetadataLoaded(token, result));
                 }

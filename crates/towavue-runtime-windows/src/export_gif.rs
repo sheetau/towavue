@@ -412,6 +412,7 @@ mod tests {
             kind: MediaKind::Image,
             operations: Vec::new(),
             hardware_encode: false,
+            video_track: None,
         }
     }
 
@@ -1648,6 +1649,7 @@ mod tests {
                 kind: MediaKind::Image,
                 operations: vec![EditOperation::RotateClockwise],
                 hardware_encode: false,
+                video_track: None,
             };
             export_media(&request).expect("GIF export");
             let actual = crate::decode_image(&target).expect("saved frames");

@@ -248,6 +248,7 @@ fn current_frame_export_keeps_clicked_picture_edits_save_state_and_owner_guards(
                         height: 48,
                     })],
                     hardware_encode: false,
+                    video_track: None,
                 },
                 ExportOptions::default(),
                 &std::sync::atomic::AtomicBool::new(false),

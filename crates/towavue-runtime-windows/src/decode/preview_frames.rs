@@ -54,8 +54,20 @@ fn preview_key(
 
 /// One worker-owned input/decoder/filter graph serves a bounded preview request.
 /// Only reduced owned pixels leave this auxiliary software path, never playback frames.
+#[cfg(test)]
 pub(crate) fn preview_video_frames(
     path: &Path,
+    targets: &[Duration],
+    filter: &str,
+    cancelled: &(dyn Fn() -> bool + Sync),
+    emit: impl FnMut(usize, crate::PreviewImage),
+) -> Result<(), DecodeError> {
+    preview_video_frames_for_track(path, None, targets, filter, cancelled, emit)
+}
+
+pub(crate) fn preview_video_frames_for_track(
+    path: &Path,
+    track: Option<VideoTrackId>,
     targets: &[Duration],
     filter: &str,
     cancelled: &(dyn Fn() -> bool + Sync),
@@ -64,7 +76,7 @@ pub(crate) fn preview_video_frames(
     check_cancelled(cancelled)?;
     ffmpeg::init()?;
     let mut input = format::input(path)?;
-    let config = best_stream_config(&input, Type::Video).ok_or(DecodeError::NoMediaStream)?;
+    let config = video_tracks::selected_config(&input, track)?;
     let orientation = VideoOrientation::from_bytes(config.display_matrix.as_deref())?;
     let mut context = codec::context::Context::from_parameters(config.parameters)?;
     context.set_threading(codec::threading::Config::count(1));
@@ -95,7 +107,7 @@ pub(crate) fn preview_video_frames(
             if target == MediaTime::ZERO {
                 input.seek(origin, ..origin)?;
             } else {
-                seek_input(&mut input, target, true, cancelled)?;
+                seek_input_with_tracks(&mut input, target, true, None, track, cancelled)?;
             }
             decoder.flush();
             selected = None;

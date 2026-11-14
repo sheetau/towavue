@@ -148,6 +148,7 @@ fn high_depth_raster_edits_transform_full_resolution_chroma_before_subsampling()
                         kind: MediaKind::Video,
                         operations,
                         hardware_encode: false,
+                        video_track: None,
                     };
                     let streams = ExportStreams {
                         video_encoding: video_encoding::HighDepth::probe(&request)

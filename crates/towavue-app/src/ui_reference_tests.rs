@@ -175,6 +175,7 @@ fn media_reference_layouts_reach_the_gpu() {
                             kind: MediaKind::Image,
                             operations: vec![],
                             hardware_encode: false,
+                            video_track: None,
                         };
                         let options = ExportOptions::default();
                         app.active_export = Some(ActiveExport {

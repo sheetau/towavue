@@ -1224,6 +1224,7 @@ mod tests {
                 kind: towavue_core::MediaKind::Image,
                 operations: saved,
                 hardware_encode: false,
+                video_track: None,
             };
             crate::export_media(&request).expect("saved PNG");
             let baseline = crate::decode_image(&request.target).expect("saved pixels");
@@ -1489,6 +1490,7 @@ mod tests {
                 kind: towavue_core::MediaKind::Image,
                 operations,
                 hardware_encode: false,
+                video_track: None,
             })
             .expect("export PNG");
             let exported = crate::decode_image(&target).expect("reopen PNG");
@@ -1517,6 +1519,7 @@ mod tests {
                     ImageRotation::new(450, (9, 7)).expect("rotation"),
                 )],
                 hardware_encode: false,
+                video_track: None,
             });
             let error = result.expect_err("image-only edit rejects other media");
             assert!(matches!(
@@ -1668,6 +1671,7 @@ mod tests {
                 kind: towavue_core::MediaKind::Image,
                 operations,
                 hardware_encode: false,
+                video_track: None,
             })
             .expect("PNG export");
             let exported = crate::decode_image(&target).expect("exported PNG");

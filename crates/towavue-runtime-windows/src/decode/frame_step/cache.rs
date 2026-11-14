@@ -11,6 +11,7 @@ const CAPACITY: usize = 32;
 pub struct FrameStepCache {
     source: Option<Arc<FrameSource>>,
     timeline: Option<EditTimeline>,
+    track: Option<towavue_core::VideoTrackId>,
     window: Window,
     #[cfg(test)]
     pub(super) misses: usize,
@@ -25,10 +26,24 @@ impl FrameStepCache {
         timeline: Option<&EditTimeline>,
         cancelled: &(dyn Fn() -> bool + Sync),
     ) -> Result<Option<MediaTime>, DecodeError> {
+        self.adjacent_for_track(path, None, target, forward, timeline, cancelled)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn adjacent_for_track(
+        &mut self,
+        path: &Path,
+        track: Option<towavue_core::VideoTrackId>,
+        target: MediaTime,
+        forward: bool,
+        timeline: Option<&EditTimeline>,
+        cancelled: &(dyn Fn() -> bool + Sync),
+    ) -> Result<Option<MediaTime>, DecodeError> {
         check_cancelled(cancelled)?;
         let source = source_stamp(path);
         if source.is_some()
             && source == self.source
+            && track == self.track
             && timeline == self.timeline.as_ref()
             && let Some(next) = self.window.adjacent(target, forward)
         {
@@ -47,6 +62,7 @@ impl FrameStepCache {
         let mut observed = Window::default();
         let result = query(
             path,
+            track,
             target,
             forward,
             timeline,
@@ -56,6 +72,7 @@ impl FrameStepCache {
         check_cancelled(cancelled)?;
         if source.is_some() && !observed.unordered && source_stamp(path) == source {
             self.source = source;
+            self.track = track;
             self.timeline = timeline.cloned();
             self.window = observed;
         }

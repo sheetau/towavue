@@ -79,6 +79,7 @@ fn request(source: &Path, target: &Path) -> ExportRequest {
         kind: MediaKind::Image,
         operations: vec![],
         hardware_encode: false,
+        video_track: None,
     }
 }
 

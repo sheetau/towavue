@@ -48,6 +48,7 @@ fn pasted_pixels_keep_transparency_and_original_lifetime_through_edit_export() {
             kind: towavue_core::MediaKind::Image,
             operations: vec![towavue_core::EditOperation::FlipHorizontal],
             hardware_encode: false,
+            video_track: None,
         },
         crate::ExportOptions::default(),
     )

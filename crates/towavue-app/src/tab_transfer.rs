@@ -33,6 +33,7 @@ pub(super) struct MediaTabTransfer {
     timeline_heights: Option<[f32; 2]>,
     preview_rate: Option<f32>,
     audio_preview: Option<audio_preview::Choice>,
+    video_choice: Option<video_tracks::Choice>,
     subtitles: Option<subtitles::Choice>,
     focus: Option<egui::Id>,
     browser: Option<filmstrip_browser::View>,
@@ -340,6 +341,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             timeline_heights: self.timeline_heights.tabs.remove(&id),
             preview_rate: self.preview_rates.remove(&id),
             audio_preview: self.audio_preview_choices.remove(&id),
+            video_choice: self.video_choices.remove(&id),
             subtitles: self.subtitles.take_choice(id),
             focus,
             timeline,
@@ -424,6 +426,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         if let Some(options) = transfer.metadata_options {
             self.metadata_export_settings.insert(id, options);
+        }
+        if let Some(choice) = transfer.video_choice {
+            self.video_choices.insert(id, choice);
         }
         if let Some(choice) = transfer.audio_preview {
             self.audio_preview_choices.insert(id, choice);

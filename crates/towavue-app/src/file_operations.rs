@@ -301,6 +301,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 if let Some(choice) = self.audio_export_tracks.get_mut(id) {
                     choice.relocate(source, target);
                 }
+                if let Some(choice) = self.video_choices.get_mut(id) {
+                    choice.relocate(source, target);
+                }
                 if let Some(choice) = self.audio_preview_choices.get_mut(id) {
                     choice.relocate(source, target);
                 }

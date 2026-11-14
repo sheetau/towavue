@@ -116,9 +116,7 @@ impl HighDepth {
         }
         let inspect = || -> Result<_, ffmpeg::Error> {
             let input = ffmpeg::format::input(&request.source)?;
-            let stream = input
-                .streams()
-                .best(ffmpeg::media::Type::Video)
+            let stream = selected_video(&input, request.video_track)?
                 .ok_or(ffmpeg::Error::StreamNotFound)?;
             let decoder = ffmpeg::codec::context::Context::from_parameters(stream.parameters())?
                 .decoder()

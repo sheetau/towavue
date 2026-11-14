@@ -142,6 +142,7 @@ fn edited_static_and_animated_webp_keep_descriptive_only_packets() {
             kind: MediaKind::Image,
             operations: vec![EditOperation::RotateClockwise],
             hardware_encode: false,
+            video_track: None,
         })
         .expect("baseline encoding");
         let source_bytes = tagged(&fs::read(&source).expect("source"), &packet);
@@ -159,6 +160,7 @@ fn edited_static_and_animated_webp_keep_descriptive_only_packets() {
             kind: MediaKind::Image,
             operations: vec![EditOperation::RotateClockwise],
             hardware_encode: false,
+            video_track: None,
         })
         .expect("edited default export");
         let bytes = fs::read(&target).expect("saved file");
@@ -311,6 +313,7 @@ fn unedited_webp_export_preserves_bitstreams_and_ancillary_chunks() {
         kind: MediaKind::Image,
         operations: vec![],
         hardware_encode: false,
+        video_track: None,
     };
     let mut inputs = vec![fixture(false), fixture(true)];
     for alpha in [false, true] {
@@ -443,6 +446,7 @@ fn unedited_webp_export_validates_pixels_and_preserves_targets_on_failure() {
         kind: MediaKind::Image,
         operations: vec![],
         hardware_encode: false,
+        video_track: None,
     };
     for before in [true, false] {
         let cancel = AtomicBool::new(before);
@@ -508,6 +512,7 @@ fn webp_real_export_keeps_sets_removes_nine_fields_and_protects_files_on_failure
         kind: MediaKind::Image,
         operations: vec![EditOperation::RotateClockwise],
         hardware_encode: false,
+        video_track: None,
     };
     export_media(&request).expect("all Keep export");
     let baseline = fs::read(&target).expect("baseline");
@@ -679,6 +684,7 @@ fn jpeg_webp_conversion_sets_removes_and_protects_all_xmp_fields() {
         kind: MediaKind::Image,
         operations: vec![],
         hardware_encode: false,
+        video_track: None,
     };
     export_media(&request).expect("tagged JPEG");
     for (source, extension) in [(&webp, "jpg"), (&jpeg, "webp")] {
@@ -860,6 +866,7 @@ fn jpeg_webp_conversion_keeps_language_author_order_and_noncanonical_source_spel
             kind: MediaKind::Image,
             operations: vec![],
             hardware_encode: false,
+            video_track: None,
         })
         .expect("Keep through conversion");
         let values = if jpeg_metadata::jpeg_path(&target) {

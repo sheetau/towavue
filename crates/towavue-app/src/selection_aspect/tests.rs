@@ -541,6 +541,7 @@ fn image_aspect_presets_use_edited_geometry_preserve_history_and_export_selected
         kind: MediaKind::Image,
         operations: app.edits[&tab].operations().to_vec(),
         hardware_encode: false,
+        video_track: None,
     })
     .expect("export");
     let exported = decode_image(&target).expect("reopen").frames.remove(0);

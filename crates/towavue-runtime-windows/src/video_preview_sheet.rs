@@ -159,8 +159,16 @@ impl PreviewCache {
         source: &Path,
         layout: VideoSheetLayout,
     ) -> Result<Option<VideoPreviewSheet>, PreviewError> {
+        self.cached_video_sheet_for_track(source, None, layout)
+    }
+    pub fn cached_video_sheet_for_track(
+        &self,
+        source: &Path,
+        track: Option<towavue_core::VideoTrackId>,
+        layout: VideoSheetLayout,
+    ) -> Result<Option<VideoPreviewSheet>, PreviewError> {
         self.check_cancelled()?;
-        let key = cache_key(source, &layout.variant())?;
+        let key = cache_key(source, &track_variant(layout, track))?;
         let image = self.memory.lock().expect("preview memory").get(&key);
         self.check_cancelled()?;
         Ok(image.map(|image| VideoPreviewSheet { layout, image }))
@@ -170,15 +178,24 @@ impl PreviewCache {
         source: &Path,
         layout: VideoSheetLayout,
     ) -> Result<VideoPreviewSheet, PreviewError> {
+        self.video_sheet_for_track(source, None, layout)
+    }
+    pub fn video_sheet_for_track(
+        &self,
+        source: &Path,
+        track: Option<towavue_core::VideoTrackId>,
+        layout: VideoSheetLayout,
+    ) -> Result<VideoPreviewSheet, PreviewError> {
         self.check_cancelled()?;
-        let key = cache_key(source, &layout.variant())?;
+        let key = cache_key(source, &track_variant(layout, track))?;
         let image = self.load_or_generate_ready(key.clone(), || {
             let mut sheet = SheetBuilder::default();
             let targets: Vec<_> = (0..CELLS)
                 .filter_map(|slot| layout.position(slot))
                 .collect();
-            let result = crate::decode::preview_video_frames(
+            let result = crate::decode::preview_video_frames_for_track(
                 source,
+                track,
                 &targets,
                 FILTER,
                 &|| {
@@ -204,14 +221,20 @@ impl PreviewCache {
                 sheet = SheetBuilder::default();
                 for (slot, position) in targets.into_iter().enumerate() {
                     self.check_cancelled()?;
-                    let png = frame_preview(source, position, FILTER, self.cancellation.as_ref())?;
+                    let png = frame_preview_for_track(
+                        source,
+                        track,
+                        position,
+                        FILTER,
+                        self.cancellation.as_ref(),
+                    )?;
                     let frame = image::load_from_memory_with_format(&png, image::ImageFormat::Png)?
                         .into_rgba8();
                     sheet.insert(slot, frame);
                 }
             }
             self.check_cancelled()?;
-            let current = cache_key(source, &layout.variant())?;
+            let current = cache_key(source, &track_variant(layout, track))?;
             if current != key {
                 return Err(PreviewError::Generate(
                     "Source changed during sheet generation".into(),
@@ -225,6 +248,13 @@ impl PreviewCache {
             ));
         }
         Ok(VideoPreviewSheet { layout, image })
+    }
+}
+
+fn track_variant(layout: VideoSheetLayout, track: Option<towavue_core::VideoTrackId>) -> String {
+    match track {
+        None => layout.variant(),
+        Some(track) => format!("{}-stream-{}", layout.variant(), track.index()),
     }
 }
 

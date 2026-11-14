@@ -12,6 +12,7 @@ mod image_choices_tests;
 mod language_tests;
 mod sizing;
 mod subtitles;
+mod video_tracks;
 pub(crate) use choices::Choices;
 
 pub(crate) fn shortcut_text(_ui: &egui::Ui, label: String, _enabled: bool) -> egui::RichText {
@@ -44,6 +45,9 @@ pub(crate) struct MenuData<'a> {
     pub choices: Choices,
     pub language: crate::localization::Settings,
     pub language_action: Option<crate::localization::Language>,
+    pub video_tracks: Option<&'a towavue_core::VideoTrackCatalog>,
+    pub video_selection: Option<towavue_core::VideoTrackId>,
+    pub video_action: Option<towavue_core::VideoTrackId>,
     pub audio_tracks: Option<&'a towavue_core::AudioTrackCatalog>,
     pub audio_selection: towavue_core::AudioTrackSelection,
     pub audio_action: Option<towavue_core::AudioTrackSelection>,
@@ -165,6 +169,7 @@ const MENUS: &[(Text, &[&[CommandId]])] = &[
                 ToggleVideoRepeat,
                 ToggleAudioShuffle,
                 CycleAudioTrack,
+                CycleVideoTrack,
                 LoadSubtitles,
             ],
             &[
@@ -405,6 +410,19 @@ fn show_items(
                 if *id == CycleAudioTrack {
                     if context.media_kind == Some(towavue_core::MediaKind::Video) {
                         let (response, command) = audio_tracks::submenu(
+                            ui, context, shortcuts, requested, recent, ancestor,
+                        );
+                        items.push((response.id, response.enabled()));
+                        if response.gained_focus() {
+                            response.scroll_to_me(None);
+                        }
+                        chosen = chosen.or(command);
+                    }
+                    continue;
+                }
+                if *id == CycleVideoTrack {
+                    if context.media_kind == Some(towavue_core::MediaKind::Video) {
+                        let (response, command) = video_tracks::submenu(
                             ui, context, shortcuts, requested, recent, ancestor,
                         );
                         items.push((response.id, response.enabled()));

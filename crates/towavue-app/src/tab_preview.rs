@@ -149,6 +149,7 @@ pub struct Target {
     pub path: PathBuf,
     pub kind: MediaKind,
     pub position: Duration,
+    pub track: Option<towavue_core::VideoTrackId>,
 }
 
 struct LastPosition {
@@ -219,6 +220,7 @@ impl TabPreview {
             .filter(|last| last.path == path)
             .map_or(Duration::ZERO, |last| last.position);
         Some(Target {
+            track: None,
             tab: tab.id,
             path,
             kind: tab.target.media_kind(),
@@ -237,6 +239,11 @@ impl TabPreview {
             && saved.kind == MediaKind::Video
             && saved.path == target.path
         {
+            target.track = saved.session.as_ref().and_then(|session| {
+                session
+                    .video_selection()
+                    .or(session.video_tracks().preferred)
+            });
             target.position = source_sample_time(
                 Duration::from_nanos(saved.position().as_nanoseconds().max(0) as u64),
                 saved.duration,
@@ -293,6 +300,7 @@ impl TabPreview {
         if let (Some(previous), Some(next)) = (&self.target, &target)
             && previous.tab == next.tab
             && previous.path == next.path
+            && previous.track == next.track
             && previous.kind == MediaKind::Video
             && next.kind == MediaKind::Video
             && let Some(Ok(texture)) = &self.texture
@@ -332,11 +340,15 @@ impl TabPreview {
                             target.position,
                         )
                         .ok_or(towavue_runtime_windows::PreviewError::InvalidDuration)?;
-                        if let Some(sheet) = cache.cached_video_sheet(input.path(), layout)? {
+                        if let Some(sheet) = cache.cached_video_sheet_for_track(
+                            input.path(),
+                            target.track,
+                            layout,
+                        )? {
                             return Ok(sheet);
                         }
                         let first = cache
-                            .thumbnail(input.path(), target.position, 240)
+                            .thumbnail_for_track(input.path(), target.track, target.position, 240)
                             .map_err(|error| error.to_string());
                         if !cancellation.is_cancelled() {
                             notify(crate::AppEvent::TabPreview(
@@ -346,7 +358,7 @@ impl TabPreview {
                             ));
                             first_preview_sent = true;
                         }
-                        cache.video_sheet(input.path(), layout)
+                        cache.video_sheet_for_track(input.path(), target.track, layout)
                     })
                     .map_err(|error| error.to_string());
                 if !cancellation.is_cancelled() {
@@ -358,7 +370,12 @@ impl TabPreview {
                         )),
                         Err(_) if !first_preview_sent => {
                             let result = cache
-                                .thumbnail(input.path(), target.position, 240)
+                                .thumbnail_for_track(
+                                    input.path(),
+                                    target.track,
+                                    target.position,
+                                    240,
+                                )
                                 .map_err(|error| error.to_string());
                             if !cancellation.is_cancelled() {
                                 notify(crate::AppEvent::TabPreview(target, generation, result));

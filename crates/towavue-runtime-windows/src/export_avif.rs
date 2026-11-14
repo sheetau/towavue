@@ -818,6 +818,7 @@ pub(super) fn apply_png_frames(
         kind: MediaKind::Image,
         operations: vec![],
         hardware_encode: false,
+        video_track: None,
     };
     let filters = if alpha {
         "[0:v]format=rgba,split[color][alpha];[color]format=gbrp[outv];[alpha]alphaextract,format=gray,setparams=colorspace=bt709[outa]"

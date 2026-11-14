@@ -241,6 +241,7 @@ pub(super) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(
                 kind: MediaKind::Video,
                 operations: app.edits[&tab].operations().to_vec(),
                 hardware_encode: false,
+                video_track: None,
             })
             .expect("export while zoomed");
             let frames = |path: &std::path::Path| {

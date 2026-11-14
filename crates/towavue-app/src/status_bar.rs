@@ -354,6 +354,8 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                         }
                         let time_width = if compact {
                             (ui.available_width()
+                                - self.audio_track_controls_width(ui)
+                                - self.video_track_controls_width(ui)
                                 - 54.0
                                 - if self.active_export.is_some() {
                                     100.0
@@ -388,6 +390,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                         }
                         volume_targets.push(volume);
                         self.draw_audio_track_controls(ui, actions);
+                        self.draw_video_track_controls(ui, actions);
                     } else if self.animation_timeline_visible() {
                         self.draw_animation_transport(ui, actions);
                     } else if self.media_kind == Some(MediaKind::Image) {

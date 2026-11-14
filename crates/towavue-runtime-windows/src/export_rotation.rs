@@ -15,9 +15,8 @@ pub(super) fn validate(request: &ExportRequest) -> Result<(), ExportError> {
     let validate = || -> Result<(), ExportError> {
         let input = ffmpeg::format::input(&request.source)
             .map_err(|error| ExportError::Failed(error.to_string()))?;
-        let stream = input
-            .streams()
-            .best(ffmpeg::media::Type::Video)
+        let stream = selected_video(&input, request.video_track)
+            .map_err(|error| ExportError::Failed(error.to_string()))?
             .ok_or(ExportError::Message(Text::ExportRotationMissingVideo))?;
         let matrix = stream
             .side_data()
@@ -197,6 +196,7 @@ mod tests {
             target: directory.join("baseline.mp4"),
             kind: MediaKind::Video,
             hardware_encode: false,
+            video_track: None,
             operations: vec![
                 EditOperation::SetTrimStart(MediaTime::from_nanoseconds(250_000_000)),
                 EditOperation::SetTrimEnd(MediaTime::from_nanoseconds(750_000_000)),
@@ -294,6 +294,7 @@ mod tests {
                 kind: MediaKind::Video,
                 operations: vec![EditOperation::RotateVideo(rotation)],
                 hardware_encode: false,
+                video_track: None,
             };
             export_media(&request).expect("rotation export");
             let reference = directory.join(format!("reference-{index}.mp4"));
@@ -435,6 +436,7 @@ mod tests {
             target: directory.join("actual.mp4"),
             kind: MediaKind::Video,
             hardware_encode: false,
+            video_track: None,
             operations: vec![
                 EditOperation::Crop(PixelCrop {
                     x: 4,

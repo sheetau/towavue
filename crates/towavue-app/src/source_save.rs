@@ -137,6 +137,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 .get(&id)
                 .map_or_else(Vec::new, |history| history.operations().to_vec()),
             hardware_encode: self.prefer_hardware_encode,
+            video_track: self.video_selection(),
         };
         let options = ExportOptions {
             audio_tracks: self.audio_retention_for(id, &source),
@@ -413,10 +414,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             let same_quality = self.effective_video_export_quality(request.kind, options.output)
                 == options.video_quality;
             let same_tracks = self.audio_retention_for(id, source) == options.audio_tracks;
+            let same_video = self.video_selection_for(Some(id), source) == request.video_track;
             let history = self.edits.entry(id).or_default();
             if same_input
                 && same_quality
                 && same_tracks
+                && same_video
                 && self
                     .audio_export_settings
                     .get(&id)

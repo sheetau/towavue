@@ -47,6 +47,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 .get(&id)
                 .map_or_else(Vec::new, |history| history.operations().to_vec()),
             hardware_encode: self.prefer_hardware_encode,
+            video_track: self.video_selection(),
         };
         let options = ExportOptions {
             audio_tracks: self.audio_retention_for(id, &source),
@@ -233,6 +234,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let target = saved.current_source().path();
         let tab = self.tabs.get_mut(id).expect("retained Save as tab");
         tab.target.set_current_path(target.to_owned(), request.kind);
+        if let Some(choice) = self.video_choices.get_mut(&id) {
+            choice.relocate(source, target);
+        }
         if let Some(choice) = self.audio_preview_choices.get_mut(&id) {
             choice.relocate(source, target);
         }

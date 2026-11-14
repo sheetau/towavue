@@ -10,6 +10,7 @@ fn request(source: &Path, target: &Path, kind: MediaKind) -> ExportRequest {
         kind,
         operations: vec![EditOperation::FlipHorizontal],
         hardware_encode: false,
+        video_track: None,
     }
 }
 fn prepare_save_as(
@@ -468,6 +469,7 @@ fn audio_video_and_repeated_edits_keep_the_first_original_and_publish_readable_d
             kind,
             operations: operations.clone(),
             hardware_encode: false,
+            video_track: None,
         };
         let prepared = prepare_save_as(
             MediaInput::new(source.clone()),
@@ -509,6 +511,7 @@ fn audio_video_and_repeated_edits_keep_the_first_original_and_publish_readable_d
             kind,
             operations: vec![],
             hardware_encode: false,
+            video_track: None,
         };
         let prepared = prepare_save_as(
             MediaInput::retained(target.clone(), original.clone()),

@@ -750,6 +750,7 @@ fn video_rotation_modal_previews_commits_crops_undoes_and_exports_without_changi
                 kind: MediaKind::Video,
                 operations: final_history.operations().to_vec(),
                 hardware_encode: false,
+                video_track: None,
             })
             .expect("export composed UI edits");
             let mut count = 0;

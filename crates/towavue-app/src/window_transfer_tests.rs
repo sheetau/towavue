@@ -174,6 +174,7 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         kind: MediaKind::Video,
         operations: Vec::new(),
         hardware_encode: false,
+        video_track: None,
     };
     // Same-source rejection makes this busy-state fixture incapable of writing output.
     app.active_export = Some(ActiveExport {

@@ -19,11 +19,12 @@ pub fn adjacent_video_frame(
     timeline: Option<&EditTimeline>,
     cancelled: &(dyn Fn() -> bool + Sync),
 ) -> Result<Option<MediaTime>, DecodeError> {
-    query(path, target, forward, timeline, cancelled, None)
+    query(path, None, target, forward, timeline, cancelled, None)
 }
 
 fn query(
     path: &Path,
+    track: Option<VideoTrackId>,
     target: MediaTime,
     forward: bool,
     timeline: Option<&EditTimeline>,
@@ -76,6 +77,7 @@ fn query(
             }
             let candidate = scan(
                 path,
+                track,
                 seek,
                 start,
                 end,
@@ -100,6 +102,7 @@ fn query(
 #[allow(clippy::too_many_arguments)]
 fn scan(
     path: &Path,
+    track: Option<VideoTrackId>,
     seek: MediaTime,
     start: MediaTime,
     end: Option<MediaTime>,
@@ -112,7 +115,7 @@ fn scan(
     check_cancelled(cancelled)?;
     let mut input = format::input(path)?;
     check_cancelled(cancelled)?;
-    let config = best_stream_config(&input, Type::Video).ok_or(DecodeError::NoMediaStream)?;
+    let config = video_tracks::selected_config(&input, track)?;
     let mut context = codec::context::Context::from_parameters(config.parameters)?;
     #[cfg(test)]
     let mode = PIXEL_MODE.get();

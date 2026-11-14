@@ -262,6 +262,7 @@ fn request(path: &Path, kind: MediaKind) -> ExportRequest {
         kind,
         operations: vec![],
         hardware_encode: false,
+        video_track: None,
     }
 }
 
@@ -1198,6 +1199,7 @@ fn loudness_progress_stays_indeterminate_through_encoding_verification_and_retri
         kind: MediaKind::Audio,
         operations: vec![],
         hardware_encode: false,
+        video_track: None,
     };
     let mut options = ExportOptions::default();
     options.audio.normalization =

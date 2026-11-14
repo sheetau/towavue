@@ -169,6 +169,7 @@ fn quantized_aac_timestamps_do_not_insert_silence_into_mix_edits_or_exports() {
         kind: towavue_core::MediaKind::Video,
         operations,
         hardware_encode: false,
+        video_track: None,
     })
     .expect("edited export");
     check(
@@ -237,6 +238,7 @@ fn quantized_aac_timestamps_do_not_insert_silence_into_mix_edits_or_exports() {
         kind: towavue_core::MediaKind::Video,
         operations,
         hardware_encode: false,
+        video_track: None,
     })
     .expect("trimmed export");
     check(
@@ -327,6 +329,7 @@ fn quantized_aac_keeps_real_gaps_during_preview_seek_and_export() {
         kind: towavue_core::MediaKind::Video,
         operations: vec![EditOperation::SetVolume(0.5)],
         hardware_encode: false,
+        video_track: None,
     })
     .expect("gap export");
     let exported = crate::hidden_test_command(&ffmpeg)

@@ -30,6 +30,7 @@ fn request(source: &Path, target: PathBuf) -> ExportRequest {
         kind: MediaKind::Audio,
         operations: vec![],
         hardware_encode: false,
+        video_track: None,
     }
 }
 

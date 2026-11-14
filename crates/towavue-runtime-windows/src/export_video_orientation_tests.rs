@@ -218,6 +218,7 @@ fn high_depth_display_matrices_transform_chroma_before_edits_and_clear_output_or
                         kind: MediaKind::Video,
                         operations,
                         hardware_encode: true,
+                        video_track: None,
                     };
                     let mut streams = ExportStreams::probe(&request).expect("source streams");
                     streams.video_encoding =
@@ -470,6 +471,7 @@ fn oriented_high_depth_trim_and_timeline_keep_video_audio_aligned_with_input_see
             kind: MediaKind::Video,
             operations,
             hardware_encode: true,
+            video_track: None,
         };
         let mut streams = ExportStreams::probe(&request).expect("source streams");
         streams.video_encoding = video_encoding::HighDepth::probe(&request).expect("encoding plan");

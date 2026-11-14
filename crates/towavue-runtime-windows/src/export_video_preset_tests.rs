@@ -104,6 +104,7 @@ fn video_presets_compare_actual_encodings_without_reducing_geometry_timing_or_de
                         kind: MediaKind::Video,
                         operations: vec![EditOperation::FlipHorizontal],
                         hardware_encode: scale > 1,
+                        video_track: None,
                     },
                     ExportOptions {
                         video_quality: quality,
@@ -173,6 +174,7 @@ fn video_presets_compare_actual_encodings_without_reducing_geometry_timing_or_de
                             kind: MediaKind::Video,
                             operations: vec![EditOperation::FlipHorizontal],
                             hardware_encode: true,
+                            video_track: None,
                         },
                         ExportOptions {
                             video_quality: quality,
@@ -219,6 +221,7 @@ fn video_presets_keep_audio_independent_and_tune_hardware_with_software_fallback
         kind,
         operations: Vec::new(),
         hardware_encode: true,
+        video_track: None,
     };
     for (quality, hardware_quality, software_qmax) in [
         (VideoExportQuality::High, "95", "20"),

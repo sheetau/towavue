@@ -179,6 +179,7 @@ fn japanese_export_notices_keep_destination_links_and_cancelled_continuations() 
                     kind: MediaKind::Video,
                     operations: Vec::new(),
                     hardware_encode: false,
+                    video_track: None,
                 };
                 let options = ExportOptions {
                     output: output_kind,
@@ -289,6 +290,7 @@ fn japanese_fallback_guard_keeps_decisions_and_export_disable_state() {
                 kind: MediaKind::Image,
                 operations: Vec::new(),
                 hardware_encode: false,
+                video_track: None,
             };
             let options = ExportOptions::default();
             app.active_export = Some(ActiveExport {

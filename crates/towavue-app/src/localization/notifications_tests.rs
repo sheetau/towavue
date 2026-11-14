@@ -251,6 +251,7 @@ fn japanese_export_failures_keep_edits_and_guarded_continuations() {
             kind: MediaKind::Image,
             operations: vec![],
             hardware_encode: false,
+            video_track: None,
         };
         let options = ExportOptions::default();
         app.active_export = Some(ActiveExport {

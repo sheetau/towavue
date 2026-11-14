@@ -39,6 +39,7 @@ fn video_seek_only_changes_trimmed_video_inputs_and_keeps_microsecond_bounds() {
         kind: MediaKind::Video,
         operations: Vec::new(),
         hardware_encode: false,
+        video_track: None,
     };
     let mut streams = ExportStreams {
         video: Some((3, ffmpeg::Rational(1, 1000))),
@@ -168,6 +169,7 @@ fn trial(long: bool) {
                     ]
                 },
                 hardware_encode: false,
+                video_track: None,
             };
             if mode == 2 {
                 request.operations.extend([
@@ -323,6 +325,7 @@ fn reference_midpoint_trim_reports_public_export_cost() {
         kind: MediaKind::Video,
         operations: Vec::new(),
         hardware_encode: false,
+        video_track: None,
     };
     let duration = ExportStreams::probe(&request)
         .expect("streams")

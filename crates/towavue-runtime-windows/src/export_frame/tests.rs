@@ -44,6 +44,7 @@ impl Fixture {
         let input = crate::decode::ParallelInput::open_tracked_video(&self.source, &|| false)
             .expect("tracked decoder");
         VideoFrameSnapshot {
+            track: None,
             source: input.frame_source.expect("verified file identity"),
             time: MediaTime::ZERO,
         }

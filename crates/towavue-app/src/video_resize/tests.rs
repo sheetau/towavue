@@ -253,6 +253,7 @@ pub(crate) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(
         kind: MediaKind::Video,
         operations: applied,
         hardware_encode: false,
+        video_track: None,
     })
     .expect("save UI resize");
     let mut frames = 0;

@@ -85,6 +85,7 @@ fn video_resize_exports_all_filters_exact_dimensions_sar_and_identity() {
                 target: root.join(format!("actual-{index}-{flag}.mp4")),
                 kind: MediaKind::Video,
                 hardware_encode: false,
+                video_track: None,
                 operations: vec![EditOperation::ResizeVideo(value)],
             };
             export_media(&request).expect("resize export");
@@ -160,6 +161,7 @@ fn video_resize_composes_with_rotation_crop_and_refuses_stale_or_wrong_media_bef
         target: root.join("actual.mp4"),
         kind: MediaKind::Video,
         hardware_encode: false,
+        video_track: None,
         operations: vec![
             EditOperation::ResizeVideo(first),
             EditOperation::Crop(PixelCrop {
@@ -281,6 +283,7 @@ fn oriented_video_resize_keeps_timing_and_audio_equal_to_the_unresized_export() 
         target: root.join("baseline.mp4"),
         kind: MediaKind::Video,
         hardware_encode: false,
+        video_track: None,
         operations: vec![
             EditOperation::SetTrimStart(MediaTime::from_nanoseconds(250_000_000)),
             EditOperation::SetTrimEnd(MediaTime::from_nanoseconds(750_000_000)),

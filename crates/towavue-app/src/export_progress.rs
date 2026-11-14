@@ -178,6 +178,7 @@ mod taskbar_tests {
                 kind: MediaKind::Video,
                 operations: Vec::new(),
                 hardware_encode: false,
+                video_track: None,
             };
             let options = ExportOptions::default();
             app.active_export = Some(ActiveExport {
@@ -261,6 +262,7 @@ mod taskbar_tests {
             kind: MediaKind::Video,
             operations: vec![EditOperation::SetRate(2.0)],
             hardware_encode: false,
+            video_track: None,
         };
         let options = ExportOptions::default();
         let progress = ExportProgress::new(&request, &options, Some(Duration::from_secs(100)));

@@ -67,6 +67,7 @@ fn image_fixture_frames(root: &Path, extension: &str, frames: usize) -> PathBuf 
             kind: MediaKind::Image,
             operations: vec![],
             hardware_encode: false,
+            video_track: None,
         },
         ExportOptions {
             metadata,

@@ -553,6 +553,7 @@ fn reference_exports_and_source_save_refresh_creation_order() {
         kind: MediaKind::Image,
         operations: vec![towavue_core::EditOperation::FlipHorizontal],
         hardware_encode: false,
+        video_track: None,
     };
     for phase in 0..3 {
         if phase == 1 {

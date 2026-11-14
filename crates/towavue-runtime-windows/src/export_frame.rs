@@ -15,6 +15,7 @@ use windows::Win32::Storage::FileSystem::{
 pub struct VideoFrameSnapshot {
     pub(crate) source: Arc<FrameSource>,
     pub(crate) time: MediaTime,
+    pub(crate) track: Option<towavue_core::VideoTrackId>,
 }
 
 impl VideoFrameSnapshot {
@@ -169,9 +170,13 @@ pub(super) fn export_cancellable(
         Err(error) => return Err(ExportError::Output(error)),
     }
     let staging = StagedExport::new(target)?;
-    let png = crate::edited_video_frame_png(frame.source_path(), frame.time, operations, &|| {
-        cancelled.load(Ordering::Relaxed)
-    })
+    let png = crate::decode::frame_png::edited_video_track_frame_png(
+        frame.source_path(),
+        frame.track,
+        frame.time,
+        operations,
+        &|| cancelled.load(Ordering::Relaxed),
+    )
     .map_err(|error| {
         if matches!(error, crate::DecodeError::ConsumerClosed) {
             ExportError::Cancelled

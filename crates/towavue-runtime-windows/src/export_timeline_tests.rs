@@ -98,6 +98,7 @@ fn timeline_exports_join_selected_source_frames_and_samples_without_touching_inp
                     kind,
                     operations,
                     hardware_encode: false,
+                    video_track: None,
                 })
                 .expect("timeline export");
                 let (frames, audio) = decoded(&target);
@@ -146,6 +147,7 @@ fn timeline_exports_join_selected_source_frames_and_samples_without_touching_inp
             MediaTime::from_nanoseconds(500_000_000),
         ))],
         hardware_encode: false,
+        video_track: None,
     })
     .expect("stretch export");
     let (_, stretched) = decoded(&target);
@@ -167,6 +169,7 @@ fn timeline_exports_join_selected_source_frames_and_samples_without_touching_inp
             EditOperation::Timeline(TimelineEdit::SetVolume(range(500, 1500), 2.0)),
         ],
         hardware_encode: false,
+        video_track: None,
     })
     .expect("local and master gain");
     let (_, gained) = decoded(&gain_target);
@@ -213,6 +216,7 @@ fn timeline_exports_join_selected_source_frames_and_samples_without_touching_inp
                 kind,
                 operations,
                 hardware_encode: false,
+                video_track: None,
             })
             .expect("relative-gain export");
             let (frames, audio) = decoded(&relative_target);
@@ -260,6 +264,7 @@ fn timeline_exports_join_selected_source_frames_and_samples_without_touching_inp
             EditOperation::Timeline(TimelineEdit::Keep(range(500, 1500))),
         ],
         hardware_encode: false,
+        video_track: None,
     })
     .expect("master rate after timeline selection");
     assert_eq!(decoded(&gain_target).1.len(), 24000 * 8);
@@ -271,6 +276,7 @@ fn timeline_exports_join_selected_source_frames_and_samples_without_touching_inp
             0, 2000,
         )))],
         hardware_encode: false,
+        video_track: None,
     });
     assert!(matches!(result, Err(ExportError::InvalidTimeline)));
     assert_eq!(fs::read(&target).expect("target remains"), previous);
@@ -284,6 +290,7 @@ fn timeline_exports_join_selected_source_frames_and_samples_without_touching_inp
                 500, 1000,
             )))],
             hardware_encode: false,
+            video_track: None,
         },
         &cancelled,
         &|_| cancelled.store(true, Ordering::Relaxed),
@@ -327,6 +334,7 @@ fn long_timeline_graphs_are_staged_outside_the_windows_command_line() {
         kind: MediaKind::Audio,
         operations,
         hardware_encode: false,
+        video_track: None,
     };
     let streams = ExportStreams {
         audio: Some((0, ffmpeg::Rational(1, 48000))),

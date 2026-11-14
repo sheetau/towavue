@@ -44,6 +44,7 @@ fn request(source: &Path, target: &Path, operations: Vec<EditOperation>) -> Expo
         kind: MediaKind::Image,
         operations,
         hardware_encode: false,
+        video_track: None,
     }
 }
 

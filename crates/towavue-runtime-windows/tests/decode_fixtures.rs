@@ -81,6 +81,7 @@ fn exports_minimum_h264_pixel_crop_without_changing_its_dimensions() {
             height: 16,
         })],
         hardware_encode: false,
+        video_track: None,
     })
     .expect("minimum default-encoder crop");
     let summary = decode_file(&target, |output| {
@@ -115,6 +116,7 @@ fn exports_trimmed_rate_adjusted_video_with_audio() {
             EditOperation::SetVolume(0.5),
         ],
         hardware_encode: false,
+        video_track: None,
     })
     .expect("export edited video");
 
@@ -140,6 +142,7 @@ fn uses_hardware_export_when_the_adapter_exposes_it() {
         kind: MediaKind::Video,
         operations: Vec::new(),
         hardware_encode: true,
+        video_track: None,
     })
     .expect("export with hardware preference and software fallback");
     let summary = decode_file(&target, |_| true).expect("decode hardware-preferred export");

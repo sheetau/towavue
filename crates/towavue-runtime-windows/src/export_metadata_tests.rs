@@ -103,6 +103,7 @@ fn request(source: &Path, target: &Path, kind: MediaKind) -> ExportRequest {
         kind,
         operations: vec![],
         hardware_encode: false,
+        video_track: None,
     }
 }
 

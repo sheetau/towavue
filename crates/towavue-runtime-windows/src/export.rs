@@ -56,7 +56,7 @@ mod webp_metadata;
 mod xmp;
 pub use metadata::{
     ImageMetadataFormat, MetadataExportOptions, MetadataField, MetadataSourceScope,
-    MetadataSourceValue, read_export_metadata,
+    MetadataSourceValue, read_export_metadata, read_export_metadata_for_track,
 };
 
 #[cfg(test)]
@@ -93,6 +93,8 @@ pub struct ExportRequest {
     pub kind: MediaKind,
     pub operations: Vec<EditOperation>,
     pub hardware_encode: bool,
+    /// Source-scoped timed video; None selects the source default.
+    pub video_track: Option<towavue_core::VideoTrackId>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1305,7 +1307,8 @@ impl ExportStreams {
             ffmpeg::init()?;
             let input = ffmpeg::format::input(&request.source)?;
             let video = (request.kind == MediaKind::Video)
-                .then(|| input.streams().best(ffmpeg::media::Type::Video))
+                .then(|| selected_video(&input, request.video_track))
+                .transpose()?
                 .flatten()
                 .map(|stream| {
                     let decoder =
@@ -1958,6 +1961,14 @@ mod timeline_tests;
 #[path = "export_video_quality_tests.rs"]
 mod video_quality_tests;
 
+fn selected_video(
+    input: &ffmpeg::format::context::Input,
+    track: Option<towavue_core::VideoTrackId>,
+) -> Result<Option<ffmpeg::Stream<'_>>, ffmpeg::Error> {
+    crate::decode::video_tracks::selected_stream(input, track)
+        .map_err(|_| ffmpeg::Error::StreamNotFound)
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -2080,6 +2091,7 @@ mod tests {
                 kind,
                 operations,
                 hardware_encode: false,
+                video_track: None,
             };
             let streams = ExportStreams::probe(&request).expect("selected input streams");
             for hardware in [false, true] {
@@ -2195,6 +2207,7 @@ mod tests {
                     EditOperation::SetTrimEnd(end),
                 ],
                 hardware_encode: false,
+                video_track: None,
             })
             .expect("trim export");
             let (mut actual_pixels, mut actual_samples) = (Vec::new(), 0);
@@ -2286,6 +2299,7 @@ mod tests {
                 EditOperation::SetTrimEnd(MediaTime::from_nanoseconds(100_000_001)),
             ],
             hardware_encode: false,
+            video_track: None,
         })
         .expect("source-offset trim export");
         let mut decoded_outputs = Vec::new();
@@ -2325,6 +2339,7 @@ mod tests {
                     EditOperation::SetTrimEnd(MediaTime::from_nanoseconds(end_ns)),
                 ],
                 hardware_encode: false,
+                video_track: None,
             });
             assert!(result.is_err(), "empty {kind:?} must fail: {result:?}");
             assert_eq!(
@@ -2352,6 +2367,7 @@ mod tests {
                 EditOperation::FlipHorizontal,
             ],
             hardware_encode: false,
+            video_track: None,
         };
 
         let arguments = ffmpeg_arguments(&request, false, &ExportStreams::default());
@@ -2398,6 +2414,7 @@ mod tests {
                 EditOperation::SetVolume(0.5),
             ],
             hardware_encode: false,
+            video_track: None,
         };
 
         let streams = ExportStreams {
@@ -2422,6 +2439,7 @@ mod tests {
             kind: MediaKind::Video,
             operations: Vec::new(),
             hardware_encode: true,
+            video_track: None,
         };
 
         let arguments = ffmpeg_arguments(&request, true, &ExportStreams::default()).join(" ");
@@ -2437,6 +2455,7 @@ mod tests {
             kind: MediaKind::Audio,
             operations: Vec::new(),
             hardware_encode: false,
+            video_track: None,
         };
 
         assert!(matches!(
@@ -2461,6 +2480,7 @@ mod tests {
                 kind: MediaKind::Video,
                 operations,
                 hardware_encode: false,
+                video_track: None,
             };
             assert!(matches!(
                 export_media(&request),
@@ -2494,6 +2514,7 @@ mod tests {
                 height: 0,
             })],
             hardware_encode: false,
+            video_track: None,
         });
         assert!(result.is_err(), "zero-pixel crop must fail");
         let contents = fs::read(&target).expect("target remains");
@@ -2527,6 +2548,7 @@ mod tests {
                 EditOperation::RotateClockwise,
             ],
             hardware_encode: false,
+            video_track: None,
         };
 
         export_media(&request).expect("export edited image");
@@ -2572,6 +2594,7 @@ mod tests {
                 kind: MediaKind::Image,
                 operations: vec![EditOperation::Crop(crop)],
                 hardware_encode: false,
+                video_track: None,
             })
             .expect("pixel crop export");
             let exported = crate::decode_image(&target).expect("decode cropped image");
@@ -2607,6 +2630,7 @@ mod tests {
                 }),
             ],
             hardware_encode: false,
+            video_track: None,
         })
         .expect("nested crop export");
         let exported = crate::decode_image(&target).expect("decode nested crop");
@@ -2645,6 +2669,7 @@ mod tests {
                 kind: MediaKind::Image,
                 operations: vec![EditOperation::RotateClockwise],
                 hardware_encode: false,
+                video_track: None,
             },
             move |event| match event {
                 ExportEvent::Progress(time)

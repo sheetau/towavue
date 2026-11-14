@@ -13,7 +13,8 @@ use ffmpeg::software::scaling::{self, flag::Flags};
 use ffmpeg::{ChannelLayout, Rational, Rescale, Rounding};
 use ffmpeg_next as ffmpeg;
 use thiserror::Error;
-use towavue_core::{AudioTrackId, MediaTime, TimeRange};
+use towavue_core::{AudioTrackId, MediaTime, TimeRange, VideoTrackId};
+pub(crate) mod video_tracks;
 use windows::Win32::Graphics::Direct3D11::ID3D11Texture2D;
 use windows::core::Interface;
 
@@ -27,7 +28,7 @@ mod hardware_reuse;
 mod verified_pcm;
 mod verified_video_probe;
 pub use audio_tracks::probe_audio_tracks;
-mod frame_png;
+pub(crate) mod frame_png;
 #[cfg(test)]
 pub(crate) use frame_png::verification::with_encoder_observer;
 mod frame_step;
@@ -39,7 +40,9 @@ pub use frame_step::{FrameStepCache, adjacent_video_frame};
 use packet_samples::PacketSamples;
 use video_preroll::PrerollVideoFrame;
 mod preview_frames;
+#[cfg(test)]
 pub(crate) use preview_frames::preview_video_frames;
+pub(crate) use preview_frames::preview_video_frames_for_track;
 #[cfg(test)]
 pub(crate) use preview_frames::{PREVIEW_WORK, REUSE_PREVIEW_GOP};
 mod audio_recovery;
@@ -200,6 +203,8 @@ pub enum DecodeError {
     NoMediaStream,
     #[error("the selected audio track is not present in this source")]
     AudioTrackUnavailable,
+    #[error("the selected video track is not present in this source")]
+    VideoTrackUnavailable,
     #[error("decoded frame dimensions exceed the addressable buffer size")]
     FrameTooLarge,
     #[error("the output consumer stopped accepting decoded data")]
@@ -914,6 +919,7 @@ pub(crate) struct ParallelInput {
     // Immutable for this input's lifetime, so scalar audio checkpoints can never
     // be reused for a different track with the same path and packet timestamps.
     audio_track: Option<AudioTrackId>,
+    video_track: Option<VideoTrackId>,
     pub(crate) frame_source: Option<std::sync::Arc<crate::export::frame::FrameSource>>,
     started: bool,
     // Fresh path wrappers drop the input after their run. PlaybackAudioInput also
@@ -1065,6 +1071,21 @@ impl ParallelInput {
         Ok(input)
     }
 
+    pub(crate) fn open_tracked_video_track(
+        path: &Path,
+        track: Option<VideoTrackId>,
+        cancelled: &(dyn Fn() -> bool + Sync),
+    ) -> Result<Self, DecodeError> {
+        let mut input = Self::open_tracked_video(path, cancelled)?;
+        video_tracks::selected_stream(&input.input, track)?;
+        input.video_track = track;
+        Ok(input)
+    }
+
+    pub(crate) fn matches_video_track(&self, track: Option<VideoTrackId>) -> bool {
+        self.video_track == track
+    }
+
     pub(crate) fn open(
         path: &Path,
         cancelled: &(dyn Fn() -> bool + Sync),
@@ -1084,6 +1105,7 @@ impl ParallelInput {
         Self {
             input,
             audio_track: None,
+            video_track: None,
             frame_source: None,
             started: false,
             single_use_audio: false,
@@ -1261,9 +1283,11 @@ impl ParallelInput {
             self.audio_checkpoints.begin_run();
         }
         let input = &mut self.input;
-        let video_config = (stream != Some(DecodeStream::Audio))
-            .then(|| playback_video_stream(input).map(stream_config))
-            .flatten();
+        let video_config = if stream != Some(DecodeStream::Audio) {
+            video_tracks::selected_stream(input, self.video_track)?.map(stream_config)
+        } else {
+            None
+        };
         allow_reuse &= video_config
             .as_ref()
             .is_some_and(|config| hardware_reuse::supports(config.parameters.id()));
@@ -1386,11 +1410,12 @@ impl ParallelInput {
         }
         self.started = true;
         if resume.is_none() {
-            seek_input_with_audio_track(
+            seek_input_with_tracks(
                 input,
                 seek_target,
                 video.is_some(),
                 self.audio_track,
+                self.video_track,
                 cancelled,
             )?;
         }
@@ -2270,16 +2295,29 @@ fn seek_input_with_audio_track(
     audio_track: Option<AudioTrackId>,
     cancelled: &(dyn Fn() -> bool + Sync),
 ) -> Result<(), DecodeError> {
+    seek_input_with_tracks(input, target, video, audio_track, None, cancelled)
+}
+
+fn seek_input_with_tracks(
+    input: &mut format::context::Input,
+    target: MediaTime,
+    video: bool,
+    audio_track: Option<AudioTrackId>,
+    video_track: Option<VideoTrackId>,
+    cancelled: &(dyn Fn() -> bool + Sync),
+) -> Result<(), DecodeError> {
     check_cancelled(cancelled)?;
     if target <= MediaTime::ZERO {
         return Ok(());
     }
-    if video && let Some(point) = transport_seek_point(input, target, cancelled)? {
+    if video
+        && let Some(point) = transport_seek_point_for_track(input, target, video_track, cancelled)?
+    {
         return seek_byte_position(input, point.position);
     }
     if video
         && input.format().name() != "mpegts"
-        && let Some(stream) = playback_video_stream(input)
+        && let Some(stream) = video_tracks::selected_stream(input, video_track)?
     {
         let (index, time_base) = (stream.index(), stream.time_base());
         return seek_video_stream(
@@ -2455,15 +2493,25 @@ struct TransportSeekPoint {
     start_microseconds: i64,
 }
 
+#[cfg(test)]
 fn transport_seek_point(
     input: &mut format::context::Input,
     target: MediaTime,
     cancelled: &(dyn Fn() -> bool + Sync),
 ) -> Result<Option<TransportSeekPoint>, DecodeError> {
+    transport_seek_point_for_track(input, target, None, cancelled)
+}
+
+fn transport_seek_point_for_track(
+    input: &mut format::context::Input,
+    target: MediaTime,
+    track: Option<VideoTrackId>,
+    cancelled: &(dyn Fn() -> bool + Sync),
+) -> Result<Option<TransportSeekPoint>, DecodeError> {
     if input.format().name() != "mpegts" || target <= MediaTime::ZERO {
         return Ok(None);
     }
-    let Some(stream) = input.streams().best(Type::Video) else {
+    let Some(stream) = video_tracks::selected_stream(input, track)? else {
         return Ok(None);
     };
     let index = stream.index();
@@ -2519,8 +2567,19 @@ fn transport_seek_point(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn preview_input(
     path: &Path,
+    media_type: Type,
+    target: Duration,
+    cancelled: &(dyn Fn() -> bool + Sync),
+) -> Result<(Duration, usize), DecodeError> {
+    preview_input_for_track(path, None, media_type, target, cancelled)
+}
+
+pub(crate) fn preview_input_for_track(
+    path: &Path,
+    track: Option<VideoTrackId>,
     media_type: Type,
     target: Duration,
     cancelled: &(dyn Fn() -> bool + Sync),
@@ -2529,36 +2588,50 @@ pub(crate) fn preview_input(
     ffmpeg::init()?;
     let mut input = format::input(path)?;
     check_cancelled(cancelled)?;
-    let stream = input
-        .streams()
-        .best(media_type)
-        .ok_or(DecodeError::NoMediaStream)?
-        .index();
+    let stream = if media_type == Type::Video && track.is_some() {
+        video_tracks::selected_config(&input, track)?.index
+    } else {
+        input
+            .streams()
+            .best(media_type)
+            .ok_or(DecodeError::NoMediaStream)?
+            .index()
+    };
     if media_type != Type::Video || target.is_zero() {
         return Ok((target, stream));
     }
     let target_time = MediaTime::from_nanoseconds(target.as_nanos().min(i64::MAX as u128) as i64);
-    let start = transport_seek_point(&mut input, target_time, cancelled)?
+    let start = transport_seek_point_for_track(&mut input, target_time, track, cancelled)?
         .map(|point| Duration::from_micros(point.start_microseconds as u64))
         .unwrap_or(target);
     Ok((start, stream))
 }
 
+#[cfg(test)]
 pub(crate) fn preview_last_video_time(
     path: &Path,
+    target: Duration,
+    cancelled: &(dyn Fn() -> bool + Sync),
+) -> Result<Option<Duration>, DecodeError> {
+    preview_last_video_time_for_track(path, None, target, cancelled)
+}
+
+pub(crate) fn preview_last_video_time_for_track(
+    path: &Path,
+    track: Option<VideoTrackId>,
     target: Duration,
     cancelled: &(dyn Fn() -> bool + Sync),
 ) -> Result<Option<Duration>, DecodeError> {
     check_cancelled(cancelled)?;
     ffmpeg::init()?;
     let mut input = format::input(path)?;
-    let config = best_stream_config(&input, Type::Video).ok_or(DecodeError::NoMediaStream)?;
+    let config = video_tracks::selected_config(&input, track)?;
     let mut decoder = codec::context::Context::from_parameters(config.parameters)?
         .decoder()
         .video()?;
     let origin = input_origin(&input);
     let target = MediaTime::from_nanoseconds(target.as_nanos().min(i64::MAX as u128) as i64);
-    seek_input(&mut input, target, true, cancelled)?;
+    seek_input_with_tracks(&mut input, target, true, None, track, cancelled)?;
     let mut last = None;
     let mut receive = |decoder: &mut codec::decoder::Video| -> Result<(), DecodeError> {
         loop {
@@ -2638,39 +2711,47 @@ pub(crate) struct PlaybackFormats {
     pub source_video_grid_rate: Option<f64>,
     pub source_video_grid_origin: MediaTime,
     pub audio_tracks: towavue_core::AudioTrackCatalog,
+    pub video_tracks: towavue_core::VideoTrackCatalog,
     pub subtitle_tracks: Vec<towavue_core::SubtitleTrack>,
 }
 
 /// Reuse the initial playback probe for descriptive video metadata; no second
 /// file open or render-thread probing is required to display source FPS.
+#[cfg(test)]
 pub(crate) fn probe_playback_formats(
     path: &Path,
     track: Option<AudioTrackId>,
 ) -> Result<PlaybackFormats, DecodeError> {
+    probe_playback_formats_with_video(path, track, None)
+}
+
+pub(crate) fn probe_playback_formats_with_video(
+    path: &Path,
+    track: Option<AudioTrackId>,
+    video_track: Option<VideoTrackId>,
+) -> Result<PlaybackFormats, DecodeError> {
     ffmpeg::init()?;
     let input = format::input(path)?;
-    let fps = input.streams().best(Type::Video).and_then(|stream| {
+    let selected_video = video_tracks::selected_stream(&input, video_track)?;
+    let fps = selected_video.as_ref().and_then(|stream| {
         positive_frame_rate(stream.avg_frame_rate()).or_else(|| positive_frame_rate(stream.rate()))
     });
     // FFmpeg's base rate represents timestamp spacing. The average frame
     // count per second is descriptive metadata, not a grid for VFR timestamps.
-    let grid_rate = input.streams().best(Type::Video).and_then(|stream| {
+    let grid_rate = selected_video.as_ref().and_then(|stream| {
         positive_frame_rate(stream.rate()).or_else(|| positive_frame_rate(stream.avg_frame_rate()))
     });
-    let grid_origin = input
-        .streams()
-        .best(Type::Video)
-        .map_or(MediaTime::ZERO, |stream| {
-            let start = stream.start_time();
-            if start == ffmpeg::ffi::AV_NOPTS_VALUE {
-                MediaTime::ZERO
-            } else {
-                // Match packet normalization exactly, including the time-base rounding.
-                let offset =
-                    input_origin(&input).rescale(ffmpeg::rescale::TIME_BASE, stream.time_base());
-                timestamp_to_media_time(Some(start.saturating_sub(offset)), stream.time_base())
-            }
-        });
+    let grid_origin = selected_video.as_ref().map_or(MediaTime::ZERO, |stream| {
+        let start = stream.start_time();
+        if start == ffmpeg::ffi::AV_NOPTS_VALUE {
+            MediaTime::ZERO
+        } else {
+            // Match packet normalization exactly, including the time-base rounding.
+            let offset =
+                input_origin(&input).rescale(ffmpeg::rescale::TIME_BASE, stream.time_base());
+            timestamp_to_media_time(Some(start.saturating_sub(offset)), stream.time_base())
+        }
+    });
     Ok(PlaybackFormats {
         audio_format: audio_tracks::selected_config(&input, track)?
             .map(create_audio_pipeline_from)
@@ -2680,6 +2761,7 @@ pub(crate) fn probe_playback_formats(
         source_video_grid_rate: grid_rate,
         source_video_grid_origin: grid_origin,
         audio_tracks: audio_tracks::catalog(&input),
+        video_tracks: video_tracks::catalog(&input),
         subtitle_tracks: crate::subtitles::catalog(&input),
     })
 }

@@ -308,6 +308,16 @@ impl PreviewCache {
         position: Duration,
         width: u32,
     ) -> Result<PreviewImage, PreviewError> {
+        self.thumbnail_for_track(source, None, position, width)
+    }
+
+    pub fn thumbnail_for_track(
+        &self,
+        source: &Path,
+        track: Option<towavue_core::VideoTrackId>,
+        position: Duration,
+        width: u32,
+    ) -> Result<PreviewImage, PreviewError> {
         self.check_cancelled()?;
         if MediaKind::from_path(source) == Some(MediaKind::Video) {
             if width == 0 {
@@ -315,10 +325,11 @@ impl PreviewCache {
                     "invalid thumbnail dimensions".into(),
                 ));
             }
-            return self.video_frame(
+            return self.video_frame_for_track(
                 source,
+                track,
                 position,
-                &format!("thumbnail-video-v4-{}-{width}", position.as_nanos()),
+                &format!("thumbnail-video-v4-{}-{width}{}", position.as_nanos(), track.map_or(String::new(), |track| format!("-stream-{}", track.index()))),
                 &format!("scale={width}:{width}:force_original_aspect_ratio=decrease:reset_sar=1,format=rgba"),
             );
         }
@@ -644,11 +655,23 @@ impl PreviewCache {
         variant: &str,
         filter: &str,
     ) -> Result<PreviewImage, PreviewError> {
+        self.video_frame_for_track(source, None, position, variant, filter)
+    }
+
+    fn video_frame_for_track(
+        &self,
+        source: &Path,
+        track: Option<towavue_core::VideoTrackId>,
+        position: Duration,
+        variant: &str,
+        filter: &str,
+    ) -> Result<PreviewImage, PreviewError> {
         let key = cache_key(source, variant)?;
         self.load_or_generate_ready(key.clone(), || {
             let mut frame = None;
-            let result = crate::decode::preview_video_frames(
+            let result = crate::decode::preview_video_frames_for_track(
                 source,
+                track,
                 &[position],
                 filter,
                 &|| self.cancellation.as_ref().is_some_and(Cancellation::is_cancelled),
@@ -664,7 +687,7 @@ impl PreviewCache {
                 }
                 Err(error) => {
                     crate::diagnostic!("towavue: auxiliary preview decoder unavailable; using frame fallback: {error}");
-                    (frame_preview(source, position, filter, self.cancellation.as_ref())?, None)
+                    (frame_preview_for_track(source, track, position, filter, self.cancellation.as_ref())?, None)
                 }
             };
             self.check_cancelled()?;
@@ -1389,8 +1412,19 @@ fn frame_preview(
     filter: &str,
     cancellation: Option<&Cancellation>,
 ) -> Result<Vec<u8>, PreviewError> {
+    frame_preview_for_track(source, None, position, filter, cancellation)
+}
+
+fn frame_preview_for_track(
+    source: &Path,
+    track: Option<towavue_core::VideoTrackId>,
+    position: Duration,
+    filter: &str,
+    cancellation: Option<&Cancellation>,
+) -> Result<Vec<u8>, PreviewError> {
     let generate = |position| {
-        let mut arguments = preview_input_arguments(source, position, cancellation)?;
+        let mut arguments =
+            preview_input_arguments_for_track(source, track, position, cancellation)?;
         arguments.extend(["-vf".into(), filter.into(), "-frames:v".into(), "1".into()]);
         run_ffmpeg(&arguments, cancellation)
     };
@@ -1398,9 +1432,10 @@ fn frame_preview(
         Err(PreviewError::NoFrame)
             if !position.is_zero() && MediaKind::from_path(source) == Some(MediaKind::Video) =>
         {
-            let last = crate::decode::preview_last_video_time(source, position, &|| {
-                cancellation.is_some_and(Cancellation::is_cancelled)
-            });
+            let last =
+                crate::decode::preview_last_video_time_for_track(source, track, position, &|| {
+                    cancellation.is_some_and(Cancellation::is_cancelled)
+                });
             check_cancelled(cancellation)?;
             let last = last?
                 .filter(|last| *last < position)
@@ -1466,8 +1501,18 @@ fn tool_path(name: &'static str) -> Result<PathBuf, PreviewError> {
     })
 }
 
+#[cfg(test)]
 fn preview_input_arguments(
     source: &Path,
+    position: Duration,
+    cancellation: Option<&Cancellation>,
+) -> Result<Vec<String>, PreviewError> {
+    preview_input_arguments_for_track(source, None, position, cancellation)
+}
+
+fn preview_input_arguments_for_track(
+    source: &Path,
+    track: Option<towavue_core::VideoTrackId>,
     position: Duration,
     cancellation: Option<&Cancellation>,
 ) -> Result<Vec<String>, PreviewError> {
@@ -1476,9 +1521,13 @@ fn preview_input_arguments(
     let (start, stream) = if is_image {
         (position, 0)
     } else {
-        crate::decode::preview_input(source, ffmpeg_next::media::Type::Video, position, &|| {
-            cancellation.is_some_and(Cancellation::is_cancelled)
-        })?
+        crate::decode::preview_input_for_track(
+            source,
+            track,
+            ffmpeg_next::media::Type::Video,
+            position,
+            &|| cancellation.is_some_and(Cancellation::is_cancelled),
+        )?
     };
     let mut arguments = Vec::new();
     // image2 can skip its only packet even when seeking to zero.
@@ -2541,6 +2590,7 @@ mod tests {
                 kind: MediaKind::Video,
                 operations: Vec::new(),
                 hardware_encode: false,
+                video_track: None,
             };
             if mode == "missing-both" {
                 assert!(
@@ -2667,3 +2717,7 @@ mod tests {
         fs::remove_dir_all(root).expect("remove isolated helper fixture");
     }
 }
+
+#[cfg(test)]
+#[path = "video_track_tests.rs"]
+mod video_track_tests;

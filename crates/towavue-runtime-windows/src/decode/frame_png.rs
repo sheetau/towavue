@@ -36,10 +36,24 @@ pub fn edited_video_frame_png(
     operations: &[EditOperation],
     cancelled: &(dyn Fn() -> bool + Sync),
 ) -> Result<Vec<u8>, DecodeError> {
+    edited_video_track_frame_png(path, None, target, operations, cancelled)
+}
+
+pub(crate) fn edited_video_track_frame_png(
+    path: &Path,
+    track: Option<VideoTrackId>,
+    target: MediaTime,
+    operations: &[EditOperation],
+    cancelled: &(dyn Fn() -> bool + Sync),
+) -> Result<Vec<u8>, DecodeError> {
     check_cancelled(cancelled)?;
     ffmpeg::init()?;
     let mut input = format::input(path)?;
-    let config = best_stream_config(&input, Type::Video).ok_or(DecodeError::NoMediaStream)?;
+    let config = match track {
+        Some(_) => video_tracks::selected_stream(&input, track)?.map(stream_config),
+        None => best_stream_config(&input, Type::Video),
+    }
+    .ok_or(DecodeError::NoMediaStream)?;
     let orientation = VideoOrientation::from_bytes(config.display_matrix.as_deref())?;
     let mut options = ffmpeg::Dictionary::new();
     options.set("max_pixels", &MAX_PIXELS.to_string());

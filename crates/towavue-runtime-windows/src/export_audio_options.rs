@@ -168,6 +168,7 @@ pub(super) fn analysis_log(
         kind: MediaKind::Audio,
         target: request.target.with_extension("wav"),
         hardware_encode: false,
+        video_track: None,
         ..request.clone()
     };
     let mut streams = streams.clone();

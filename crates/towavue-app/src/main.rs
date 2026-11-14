@@ -134,6 +134,7 @@ mod video_resize;
 mod video_rotation;
 mod video_scrub;
 mod video_sheets;
+mod video_tracks;
 mod video_view;
 mod view_preferences;
 mod view_resize;
@@ -334,6 +335,7 @@ impl PlaybackClock {
 enum UiAction {
     Language(localization::Language),
     AudioTrack(Option<TabId>, u64, towavue_core::AudioTrackSelection),
+    VideoTrack(Option<TabId>, u64, towavue_core::VideoTrackId),
     Subtitle(Option<TabId>, u64, subtitles::Action),
     KeybindingChange(TabId, keyboard_settings::Change),
     ConfigureKeybinding(CommandId),
@@ -595,6 +597,7 @@ enum GuardedAction {
     NavigateHistory(path_history::Request, PathBuf),
     NavigateAudioTab(TabId, PathBuf, PathBuf),
     NavigateImageTab(TabId, u64, PathBuf, PathBuf),
+    VideoTrack(TabId, u64, PathBuf, towavue_core::VideoTrackId),
     Exit,
     CoordinatedExit(u64),
 }
@@ -1142,6 +1145,7 @@ struct Application<N> {
     playback_volumes: BTreeMap<TabId, playback_volume::PlaybackVolume>,
     preview_rates: BTreeMap<TabId, f32>,
     audio_preview_choices: BTreeMap<TabId, audio_preview::Choice>,
+    video_choices: BTreeMap<TabId, video_tracks::Choice>,
     subtitles: subtitles::State,
     language_settings: localization::Settings,
     last_playback_volume: Arc<std::sync::Mutex<playback_volume::PlaybackVolume>>,
@@ -1459,6 +1463,7 @@ where
             playback_volumes: BTreeMap::new(),
             preview_rates: BTreeMap::new(),
             audio_preview_choices: BTreeMap::new(),
+            video_choices: BTreeMap::new(),
             subtitles: subtitles::State::default(),
             language_settings: localization::Settings::default(),
             last_playback_volume: Arc::default(),
@@ -2556,7 +2561,7 @@ where
         // Navigation keeps Filmstrip visible; prime the new session paused so
         // neither audio nor the playback clock advances behind the browser.
         let paused = self.filmstrip_open;
-        match PlaybackSession::open_input_with_audio(
+        match PlaybackSession::open_input_with_tracks(
             self.media_input(&path),
             graphics_device,
             self.edit_state().volume * self.playback_volume(),
@@ -2565,6 +2570,7 @@ where
             paused,
             self.audio_selection_for(self.displayed_tab, &path),
             self.edit_state().audio_output,
+            self.video_selection_for(self.displayed_tab, &path),
             move |event| notify(AppEvent::Playback(media_generation, event)),
         ) {
             Ok(session) => {
@@ -2641,10 +2647,11 @@ where
         self.thumbnail_request = self.thumbnail_request.wrapping_add(1);
         let request = self.thumbnail_request;
         let input = self.media_input(&path);
+        let track = self.video_preview_track();
         self.thumbnail_worker.submit(move |cancellation| {
             let cache = cache.cancellable(cancellation);
             let result = cache
-                .thumbnail(input.path(), position, 240)
+                .thumbnail_for_track(input.path(), track, position, 240)
                 .map_err(|error| error.to_string());
             notify(AppEvent::Thumbnail(
                 path, generation, bucket, request, result,
@@ -2661,6 +2668,7 @@ where
             return None;
         }
         let target = video_sheets::Request {
+            track: self.video_preview_track(),
             path: self.path.clone()?,
             layout: towavue_runtime_windows::VideoSheetLayout::for_position(
                 self.media_duration?,
@@ -5834,6 +5842,9 @@ where
                         audio_tracks: self.session.as_ref().map(PlaybackSession::audio_tracks),
                         audio_selection: self.audio_selection(),
                         audio_action: None,
+                        video_tracks: self.session.as_ref().map(PlaybackSession::video_tracks),
+                        video_selection: self.video_selection(),
+                        video_action: None,
                         subtitle_tracks: self
                             .session
                             .as_ref()
@@ -5866,6 +5877,13 @@ where
                         !self.modal_input_blocked(),
                         &mut recent,
                     );
+                    if let Some(selection) = recent.video_action {
+                        actions.push(UiAction::VideoTrack(
+                            self.displayed_tab,
+                            self.media_generation,
+                            selection,
+                        ));
+                    }
                     if let Some(selection) = recent.audio_action {
                         actions.push(UiAction::AudioTrack(
                             self.displayed_tab,
@@ -6391,10 +6409,18 @@ where
                                                     && Some(saved.path.as_path())
                                                         == tab.target.current_path()
                                             });
-                                        let target = self
+                                        let mut target = self
                                             .tab_preview
                                             .target_with_playback(tab, background)
                                             .expect("file-backed hover card");
+                                        target.track = self
+                                            .video_selection_for(Some(tab.id), &target.path)
+                                            .or(target.track)
+                                            .or_else(|| {
+                                                (self.displayed_tab == Some(tab.id))
+                                                    .then(|| self.video_preview_track())
+                                                    .flatten()
+                                            });
                                         let folder = hovered
                                             .then(|| self.preview_folder(tab.id, &target.path))
                                             .flatten();
@@ -7357,6 +7383,9 @@ where
                         palette::Value::Command(command) => {
                             actions.push(UiAction::Command(command))
                         }
+                        palette::Value::Video(selection) => {
+                            actions.push(UiAction::VideoTrack(owner.0, owner.1, selection))
+                        }
                         palette::Value::Audio(selection) => {
                             actions.push(UiAction::AudioTrack(owner.0, owner.1, selection))
                         }
@@ -7669,6 +7698,11 @@ where
                 self.scrub_image(path, generation, owner);
             }
             UiAction::Language(language) => (self.notify)(AppEvent::Language(language)),
+            UiAction::VideoTrack(tab, generation, selection) => {
+                if tab == self.displayed_tab && generation == self.media_generation {
+                    self.select_video_track(selection);
+                }
+            }
             UiAction::AudioTrack(tab, generation, selection) => {
                 if tab == self.displayed_tab && generation == self.media_generation {
                     self.select_audio_track(selection);
@@ -8073,6 +8107,7 @@ where
             CommandId::NextSameKind => self.navigate(true, true),
             CommandId::CycleAudioRepeat => self.change_audio_mode(false),
             CommandId::CycleAudioTrack => self.cycle_audio_track(),
+            CommandId::CycleVideoTrack => self.cycle_video_track(),
             CommandId::LoadSubtitles => self.open_subtitle_picker(),
             CommandId::ToggleSubtitles => self
                 .apply_subtitle_action(subtitles::Action::Show(!self.subtitle_settings().visible)),
@@ -9480,6 +9515,7 @@ where
             kind,
             operations,
             hardware_encode: self.prefer_hardware_encode,
+            video_track: self.video_selection(),
         };
         let notify = Arc::clone(&self.notify);
         let options = ExportOptions {
@@ -9947,7 +9983,8 @@ where
                 GuardedAction::CloseTab(id)
                 | GuardedAction::DetachTab(id)
                 | GuardedAction::NavigateAudioTab(id, _, _)
-                | GuardedAction::NavigateImageTab(id, _, _, _) => *id == export.tab,
+                | GuardedAction::NavigateImageTab(id, _, _, _)
+                | GuardedAction::VideoTrack(id, _, _, _) => *id == export.tab,
                 GuardedAction::CloseTabs(ids) => ids.contains(&export.tab),
                 GuardedAction::Navigate(_)
                 | GuardedAction::View(_)
@@ -9976,7 +10013,8 @@ where
             }),
             GuardedAction::CloseTab(id)
             | GuardedAction::NavigateAudioTab(id, _, _)
-            | GuardedAction::NavigateImageTab(id, _, _, _) => self
+            | GuardedAction::NavigateImageTab(id, _, _, _)
+            | GuardedAction::VideoTrack(id, _, _, _) => self
                 .edits
                 .get(&id)
                 .is_some_and(EditHistory::is_dirty)
@@ -10082,6 +10120,9 @@ where
                         self.advance_background_audio(id, path);
                     }
                 }
+            }
+            GuardedAction::VideoTrack(id, instance, source, track) => {
+                self.switch_video_track(id, instance, source, track);
             }
             GuardedAction::NavigateImageTab(id, instance, source, path) => {
                 self.navigate_image_tab(id, instance, source, path);
@@ -10260,6 +10301,7 @@ where
         self.timeline_heights.tabs.remove(&id);
         self.preview_rates.remove(&id);
         self.audio_preview_choices.remove(&id);
+        self.video_choices.remove(&id);
         self.subtitles.take_choice(id);
         if remember
             && !deleted
@@ -17095,6 +17137,7 @@ mod tests {
                     kind: MediaKind::Image,
                     operations: Vec::new(),
                     hardware_encode: false,
+                    video_track: None,
                 };
                 // Same-source rejection keeps this UI fixture free of file writes and FFmpeg.
                 let mut metadata = MetadataExportOptions::default();
@@ -18711,6 +18754,7 @@ mod tests {
             kind: MediaKind::Image,
             operations: vec![],
             hardware_encode: false,
+            video_track: None,
         })
         .expect("image fixture");
         for name in ["a-next.png", "b-last.png"] {
@@ -28309,6 +28353,7 @@ mod tests {
                         kind: MediaKind::Video,
                         operations,
                         hardware_encode: false,
+                        video_track: None,
                     })
                     .expect("orientation export");
                     let exported = first_frame(&target);
@@ -28422,6 +28467,7 @@ mod tests {
                 .operations()
                 .to_vec(),
             hardware_encode: false,
+            video_track: None,
         })
         .expect("export visual edits");
         let exported = first_frame(&target);

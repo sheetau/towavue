@@ -1038,6 +1038,7 @@ fn run_app_trial(root: PathBuf, audio: bool) {
                     kind: MediaKind::Video,
                     operations: app.edits[&tab].operations().to_vec(),
                     hardware_encode: false,
+                    video_track: None,
                 })
                 .expect("export UI-created history");
                 let mut actual_frames = 0;

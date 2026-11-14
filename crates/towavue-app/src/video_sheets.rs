@@ -9,6 +9,7 @@ use towavue_runtime_windows::{LatestTask, PreviewCache, VideoPreviewSheet, Video
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Request {
     pub path: PathBuf,
+    pub track: Option<towavue_core::VideoTrackId>,
     pub layout: VideoSheetLayout,
 }
 
@@ -95,7 +96,7 @@ impl VideoSheets {
         self.worker.submit(move |cancel| {
             let result = cache
                 .cancellable(cancel.clone())
-                .video_sheet(input.path(), target.layout)
+                .video_sheet_for_track(input.path(), target.track, target.layout)
                 .map_err(|error| error.to_string());
             if !cancel.is_cancelled() {
                 notify(crate::AppEvent::VideoSheet(target, generation, result));
@@ -189,6 +190,7 @@ mod tests {
 
     fn target(index: u64) -> Request {
         Request {
+            track: None,
             path: "owned-fixture.mp4".into(),
             layout: VideoSheetLayout::for_position(
                 Duration::from_secs(3600),

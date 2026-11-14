@@ -102,6 +102,7 @@ impl PendingFrameExport {
             kind: MediaKind::Video,
             operations: self.operations,
             hardware_encode: false,
+            video_track: None,
         };
         let notify = Arc::clone(&app.notify);
         match ExportJob::start_video_frame_input(

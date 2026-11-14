@@ -127,6 +127,7 @@ fn request(source: &Path, target: PathBuf, operations: Vec<EditOperation>) -> Ex
         kind: MediaKind::Video,
         operations,
         hardware_encode: false,
+        video_track: None,
     }
 }
 

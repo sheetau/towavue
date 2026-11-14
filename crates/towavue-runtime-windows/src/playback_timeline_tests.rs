@@ -471,6 +471,7 @@ fn edited_audio_has_export_equivalent_samples_bounded_chunks_and_cancellation() 
             kind: towavue_core::MediaKind::Audio,
             operations: edits,
             hardware_encode: false,
+            video_track: None,
         })
         .expect("export reference");
         let mut exported = Vec::new();
@@ -669,6 +670,7 @@ fn short_stretched_spans_keep_signal_and_export_equivalent_joins() {
             kind: towavue_core::MediaKind::Audio,
             operations: edits,
             hardware_encode: false,
+            video_track: None,
         })
         .expect("short stretched export");
         let mut exported = Vec::new();
@@ -807,6 +809,7 @@ fn sample_aligned_timeline_joins_do_not_pad_or_drop_audio_frames() {
         kind: towavue_core::MediaKind::Audio,
         operations: edits,
         hardware_encode: false,
+        video_track: None,
     })
     .expect("export");
     let mut exported = Vec::new();
@@ -861,6 +864,7 @@ fn sample_aligned_timeline_joins_do_not_pad_or_drop_audio_frames() {
                 EditOperation::SetRate(f32::NAN),
             ],
             hardware_encode: false,
+            video_track: None,
         })
         .is_err(),
         "invalid rate must fail without panicking or overwriting"

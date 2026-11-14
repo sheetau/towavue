@@ -44,6 +44,7 @@ fn publish(path: &Path, operations: Vec<EditOperation>) -> Result<SavedSource, S
             kind: MediaKind::Image,
             operations,
             hardware_encode: false,
+            video_track: None,
         },
         ExportOptions::default(),
         &AtomicBool::new(false),

@@ -158,6 +158,7 @@ pub(super) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applic
                 kind: MediaKind::Video,
                 operations: app.edits[&tab].operations().to_vec(),
                 hardware_encode: false,
+                video_track: None,
             })
             .expect("export drag edit");
             let mut frames = 0;

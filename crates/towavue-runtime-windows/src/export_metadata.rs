@@ -160,6 +160,14 @@ pub fn read_export_metadata(
     path: &Path,
     kind: MediaKind,
 ) -> Result<Vec<MetadataSourceValue>, ExportError> {
+    read_export_metadata_for_track(path, kind, None)
+}
+
+pub fn read_export_metadata_for_track(
+    path: &Path,
+    kind: MediaKind,
+    track: Option<towavue_core::VideoTrackId>,
+) -> Result<Vec<MetadataSourceValue>, ExportError> {
     if kind == MediaKind::Image {
         return match ImageMetadataFormat::from_path(path) {
             Some(ImageMetadataFormat::Png) => png_metadata::inspect(path),
@@ -189,7 +197,8 @@ pub fn read_export_metadata(
     };
     collect(MetadataSourceScope::File, input.metadata());
     if kind == MediaKind::Video
-        && let Some(stream) = input.streams().best(ffmpeg::media::Type::Video)
+        && let Some(stream) =
+            selected_video(&input, track).map_err(|error| ExportError::Failed(error.to_string()))?
     {
         collect(MetadataSourceScope::Video, stream.metadata());
     }

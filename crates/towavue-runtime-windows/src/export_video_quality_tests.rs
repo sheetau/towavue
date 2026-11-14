@@ -27,6 +27,7 @@ fn software_h264_quality_is_explicit_and_does_not_change_other_codecs() {
                 kind,
                 operations: Vec::new(),
                 hardware_encode: hardware,
+                video_track: None,
             },
             hardware,
             VideoExportQuality::High,
@@ -148,6 +149,7 @@ fn edited_1080p_export_preserves_detail_beyond_the_default_bitrate_budget() {
             kind: MediaKind::Video,
             operations: vec![EditOperation::FlipHorizontal],
             hardware_encode: false,
+            video_track: None,
         })
         .expect("public edited export");
         let old_quality = psnr(source_text, baseline_text);
@@ -363,6 +365,7 @@ fn high_depth_exports_preserve_precision_edits_color_and_container_with_hardware
                 kind: MediaKind::Video,
                 operations: operations.clone(),
                 hardware_encode: true,
+                video_track: None,
             })
             .expect("high-depth public export");
             assert!(!outcome.used_hardware_encoder);
@@ -447,6 +450,7 @@ fn high_depth_small_chroma_hdr_and_rejection_controls() {
             kind: MediaKind::Video,
             operations: vec![EditOperation::FlipVertical],
             hardware_encode: true,
+            video_track: None,
         };
         export_media(&request).expect("AOM precision path");
         assert_video_fields(
@@ -592,6 +596,7 @@ fn high_depth_gradient_quality_survives_resize_without_an_eight_bit_intermediate
             kind: MediaKind::Video,
             operations: edits,
             hardware_encode: false,
+            video_track: None,
         })
         .expect("precision export");
         let old = precision_psnr(&reference, &baseline);
@@ -618,6 +623,7 @@ fn reference_high_depth_public_export_preserves_precision_and_reports_quality() 
         kind: MediaKind::Video,
         operations: Vec::new(),
         hardware_encode: true,
+        video_track: None,
     })
     .expect("public export");
     assert!(!outcome.used_hardware_encoder);
@@ -696,6 +702,7 @@ fn live_high_depth_export_cancellation_preserves_targets_cleans_staging_and_allo
                     kind: MediaKind::Video,
                     operations: vec![EditOperation::FlipVertical],
                     hardware_encode: true,
+                    video_track: None,
                 };
                 let plan = video_encoding::HighDepth::probe(&request)
                     .expect("source depth")
@@ -814,6 +821,7 @@ fn live_high_depth_export_cancellation_preserves_targets_cleans_staging_and_allo
                 EditOperation::SetTrimEnd(MediaTime::from_nanoseconds(100_000_000)),
             ],
             hardware_encode: true,
+            video_track: None,
         })
         .expect("successful export after cancellation");
         assert_video_fields(
@@ -893,6 +901,7 @@ fn reference_high_depth_minute_trim_matches_independent_frames_and_reports_quali
             )),
         ],
         hardware_encode: true,
+        video_track: None,
     })
     .expect("public minute trim export");
     assert!(!outcome.used_hardware_encoder);
@@ -1091,6 +1100,7 @@ fn high_depth_trim_preserves_declared_chroma_location() {
                         kind: MediaKind::Video,
                         operations: operations.clone(),
                         hardware_encode: true,
+                        video_track: None,
                     };
                     let plan = video_encoding::HighDepth::probe(&request)
                         .expect("plan")
@@ -1229,6 +1239,7 @@ fn edited_video_exports_have_periodic_random_access_without_changing_timing() {
             kind: MediaKind::Video,
             operations: vec![EditOperation::FlipHorizontal],
             hardware_encode: false,
+            video_track: None,
         };
         let streams = ExportStreams::probe(&request).expect("encoding geometry");
         assert_eq!(streams.parallel_h264, size == "320x256");

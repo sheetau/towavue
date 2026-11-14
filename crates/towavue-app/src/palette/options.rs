@@ -5,6 +5,7 @@ use towavue_core::{AudioTrackSelection, TabId};
 pub(crate) enum Value {
     Command(CommandId),
     Audio(AudioTrackSelection),
+    Video(towavue_core::VideoTrackId),
     Subtitle(crate::subtitles::Action),
 }
 
@@ -33,6 +34,7 @@ pub(crate) fn group(command: CommandId) -> bool {
             | CommandId::ResizeViewFit
             | CommandId::ExportQualityHigh
             | CommandId::CycleAudioTrack
+            | CommandId::CycleVideoTrack
             | CommandId::LoadSubtitles
     )
 }
@@ -67,6 +69,7 @@ pub(super) fn title(command: CommandId, language: localization::Language) -> Opt
             CommandId::ResizeViewFit => Text::ViewResizeBehavior,
             CommandId::ExportQualityHigh => Text::ExportQuality,
             CommandId::CycleAudioTrack => Text::AudioTracks,
+            CommandId::CycleVideoTrack => Text::VideoTracks,
             CommandId::LoadSubtitles => Text::Subtitles,
             _ => return None,
         }
@@ -261,6 +264,17 @@ impl<N: Fn(crate::AppEvent) + Send + Sync + 'static> crate::Application<N> {
                 value: Value::Command(*command),
                 current: *command == selected,
             }));
+        } else if command == CycleVideoTrack {
+            if let Some(session) = &self.session {
+                let selected = self.video_selection().or(session.video_tracks().preferred);
+                rows.extend(session.video_tracks().tracks.iter().enumerate().map(
+                    |(index, track)| OptionRow {
+                        label: crate::video_tracks::track_label(language, index, track),
+                        value: Value::Video(track.id),
+                        current: Some(track.id) == selected,
+                    },
+                ));
+            }
         } else if command == CycleAudioTrack {
             let selection = self.audio_selection();
             rows.extend(

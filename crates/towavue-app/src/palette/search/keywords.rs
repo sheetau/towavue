@@ -154,6 +154,7 @@ pub(super) fn phrases(command: CommandId) -> &'static str {
         }
         ToggleImageMinification => "downscale filter|shrink quality|縮小品質|縮小フィルター",
         CycleAudioRepeat => "loop audio|repeat song|repeat playlist|リピート|音声ループ",
+        CycleVideoTrack => "video track|video stream|angle|camera|映像切替|映像トラック|別アングル",
         CycleAudioTrack => "soundtrack|audio language|dubbing|音声切替|吹き替え",
         LoadSubtitles => "captions|subtitle file|srt|ass|字幕読み込み",
         ToggleSubtitles => "show captions|hide captions|字幕表示|字幕非表示",

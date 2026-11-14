@@ -138,6 +138,7 @@ fn ordinary_rate_export_preserves_short_audio_counts_and_channels() {
                         kind: MediaKind::Audio,
                         operations,
                         hardware_encode: false,
+                        video_track: None,
                     })
                     .expect("ordinary tempo export");
                     let bytes = pcm(&target);
@@ -192,6 +193,7 @@ fn short_rate_exports_keep_signal_and_gapless_container_lengths() {
                 kind: MediaKind::Audio,
                 operations: vec![EditOperation::SetRate(rate)],
                 hardware_encode: false,
+                video_track: None,
             };
             export_media(&request).expect("short compressed export");
             let actual = pcm(&request.target);
@@ -309,6 +311,7 @@ fn compressed_rate_export_matches_timestamped_pcm_through_trim_and_eof() {
                         kind: MediaKind::Audio,
                         operations,
                         hardware_encode: false,
+                        video_track: None,
                     };
                     export_media(&request).expect("compressed source export");
                     let actual = pcm(&request.target);
@@ -457,6 +460,7 @@ fn global_playback_equivalent_histories_export_identical_audio_and_video() {
                 kind: MediaKind::Video,
                 operations: baseline.clone(),
                 hardware_encode: false,
+                video_track: None,
             };
             export_media_with_output(&request, output).expect("baseline export");
             let ordinal = usize::from(output == ExportOutput::Media);
@@ -537,6 +541,7 @@ fn audio_only_exports_best_stream_all_formats_and_ignores_only_spatial_edits() {
             kind: MediaKind::Video,
             operations: operations.clone(),
             hardware_encode: true,
+            video_track: None,
         };
         let outcome =
             export_media_with_output(&request, ExportOutput::AudioOnly).expect("audio export");
@@ -587,6 +592,7 @@ fn audio_only_keeps_trim_rate_volume_and_edited_timeline_samples() {
             EditOperation::FlipHorizontal,
         ],
         hardware_encode: true,
+        video_track: None,
     };
     export_media_with_output(&request, ExportOutput::AudioOnly).expect("trimmed derivative");
     let reference = root.join("reference.wav");
@@ -656,6 +662,7 @@ fn audio_only_refuses_absent_audio_invalid_targets_empty_trim_and_cancellation_w
         kind: MediaKind::Video,
         operations: vec![],
         hardware_encode: false,
+        video_track: None,
     };
     assert!(matches!(
         export_output_cancellable(

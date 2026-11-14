@@ -20,6 +20,8 @@ mod tabs;
 mod timeline;
 mod video_resize;
 mod video_rotation;
+mod video_tracks;
+pub use video_tracks::{VideoTrack, VideoTrackCatalog, VideoTrackId};
 
 use std::fmt;
 use std::time::Duration;

@@ -136,6 +136,7 @@ pub use export::{
     ImageMetadataFormat, LoudnessTarget, MetadataExportOptions, MetadataField, MetadataSourceScope,
     MetadataSourceValue, VideoExportQuality, VideoFrameSnapshot, export_media,
     export_media_with_options, export_media_with_output, export_video_frame, read_export_metadata,
+    read_export_metadata_for_track,
 };
 pub use file_details::{FileDetails, current_local_date};
 pub use file_operation::{

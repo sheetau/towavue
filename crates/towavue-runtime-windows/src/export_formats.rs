@@ -235,6 +235,7 @@ impl ExportDialogRequest {
             kind: self.kind,
             operations: self.operations.clone(),
             hardware_encode: false,
+            video_track: None,
         };
         let mut formats = if self.options.output == ExportOutput::VideoFrame {
             vec![FramePng]

@@ -100,6 +100,7 @@ impl Plan {
             kind: MediaKind::Audio,
             operations: Vec::new(),
             hardware_encode: false,
+            video_track: None,
         };
         let mut streams = ExportStreams::probe(&request)?;
         if let Some(ordinal) = self.output_track {

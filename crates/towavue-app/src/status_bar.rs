@@ -3,6 +3,24 @@ use crate::*;
 #[cfg(test)]
 mod tests;
 
+/// Keep transient actions and their message inside the same inset as status text.
+pub(super) fn notice_row<R>(
+    ui: &mut egui::Ui,
+    content: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
+    let inset = chrome::TAB_PADDING.min(ui.max_rect().width().max(0.0) * 0.5);
+    ui.scope_builder(
+        egui::UiBuilder::new().max_rect(ui.max_rect().shrink2(egui::vec2(inset, 0.0))),
+        |ui| {
+            chrome::flat_buttons(ui);
+            ui.spacing_mut().item_spacing.x = 5.0;
+            ui.spacing_mut().button_padding = egui::Vec2::ZERO;
+            ui.spacing_mut().interact_size = egui::Vec2::splat(chrome::STATUS_BUTTON_SIZE);
+            ui.horizontal_centered(content).inner
+        },
+    )
+}
+
 pub(super) fn width(ui: &egui::Ui, text: &str) -> f32 {
     ui.painter()
         .layout_no_wrap(

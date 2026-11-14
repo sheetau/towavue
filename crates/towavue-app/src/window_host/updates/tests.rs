@@ -734,6 +734,13 @@ fn update_status_in_language(language: crate::localization::Language) {
                         let (_, node) = cancel.expect("status cancel");
                         assert_eq!(node.is_disabled(), native);
                         let bounds = node.bounds().expect("bounds");
+                        let area = context
+                            .memory(|memory| memory.area_rect("update-status"))
+                            .expect("update status area");
+                        assert!(
+                            (bounds.x0 as f32 - area.left() - chrome::TAB_PADDING).abs()
+                                <= 1.0 / density
+                        );
                         let label = crate::localization::Text::Cancel.in_language(language);
                         let text = output
                             .shapes

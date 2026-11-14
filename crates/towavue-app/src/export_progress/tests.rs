@@ -981,6 +981,29 @@ fn export_progress_toolbar_geometry_uia_hover_and_lightweight_loading() {
             );
             assert!(status.shapes.iter().any(|shape| matches!(&shape.shape,
                 egui::Shape::Text(text) if text.galley.text() == "Cancel")));
+            let area = app
+                .ui_context
+                .as_ref()
+                .expect("context")
+                .memory(|memory| memory.area_rect("export-status"))
+                .expect("export status area");
+            let message = status
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text().starts_with("Exporting") => {
+                        Some(text)
+                    }
+                    _ => None,
+                })
+                .expect("export message");
+            let tolerance = 1.0 / density;
+            assert!((cancel.x0 as f32 - area.left() - chrome::TAB_PADDING).abs() <= tolerance);
+            assert!((message.pos.x - cancel.x1 as f32 - 5.0).abs() <= tolerance);
+            assert!(
+                message.pos.x + message.galley.size().x
+                    <= area.right() - chrome::TAB_PADDING + tolerance
+            );
             assert_eq!(app.edits, before);
             assert_eq!(app.tabs.active().expect("tab").id, tab);
             assert_eq!(

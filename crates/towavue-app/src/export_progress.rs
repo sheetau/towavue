@@ -436,11 +436,7 @@ pub(super) fn show_status(
                 ui.id().with("padding"),
                 egui::Sense::CLICK | egui::Sense::DRAG,
             );
-            chrome::flat_buttons(ui);
-            ui.spacing_mut().item_spacing.x = chrome::STATUS_BUTTON_GAP;
-            ui.spacing_mut().button_padding = egui::Vec2::ZERO;
-            ui.spacing_mut().interact_size = egui::Vec2::splat(chrome::STATUS_BUTTON_SIZE);
-            ui.horizontal_centered(|ui| {
+            status_bar::notice_row(ui, |ui| {
                 let label = if export.job.is_save() {
                     Text::CancelSave.in_language(language)
                 } else {

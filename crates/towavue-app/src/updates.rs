@@ -142,10 +142,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 ui.set_width(rect.width());
                 ui.set_height(rect.height());
                 ui.set_clip_rect(rect.intersect(ui.ctx().content_rect()));
-                chrome::flat_buttons(ui);
-                ui.spacing_mut().item_spacing.x = chrome::STATUS_BUTTON_GAP;
-                ui.spacing_mut().button_padding = egui::Vec2::ZERO;
-                ui.horizontal_centered(|ui| {
+                status_bar::notice_row(ui, |ui| {
                     if !close.committing {
                         let cancel = chrome::status_button(
                             ui,

@@ -215,7 +215,7 @@ impl Browser {
         &mut self,
         context: &Context,
         screen: Rect,
-        _source: Option<&FolderSnapshot>,
+        show_separator: bool,
         enabled: bool,
     ) -> Option<Action> {
         let mut target = None;
@@ -253,8 +253,10 @@ impl Browser {
                     self.listing(ui, &self.folder.clone(), prepare);
                 }
                 ui.painter().rect_filled(header, 0.0, chrome::BACKGROUND);
-                ui.painter()
-                    .hline(header.x_range(), header.top() + 0.5, (1.0, chrome::BORDER));
+                if show_separator {
+                    ui.painter()
+                        .hline(header.x_range(), header.top() + 0.5, (1.0, chrome::BORDER));
+                }
                 ui.style_mut().override_font_id = Some(egui::FontId::proportional(chrome::TEXT_LG));
                 let content = header.shrink(3.0);
                 let filter_width = crate::browser_controls::filter_width(

@@ -182,6 +182,10 @@ pub(super) fn path_menu(
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    pub(super) fn status_separator_visible(&self) -> bool {
+        !self.timeline_is_visible() && !self.animation_timeline_visible()
+    }
+
     pub(super) fn draw_status_bar(
         &mut self,
         root: &mut egui::Ui,
@@ -198,7 +202,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             / density;
         egui::Panel::bottom("status")
             .exact_size(chrome::STATUS_HEIGHT)
-            .show_separator_line(!self.timeline_is_visible() && !self.animation_timeline_visible())
+            .show_separator_line(self.status_separator_visible())
             .frame(frame)
             .show(root, |ui| {
                 // Give padding its own non-focusable target before the controls,

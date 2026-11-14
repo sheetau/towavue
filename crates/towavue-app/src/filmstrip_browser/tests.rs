@@ -602,7 +602,7 @@ fn blocked_browser_keeps_control_colors_and_popups_cover_every_strip_surface() {
                         ..Default::default()
                     },
                     |_| {
-                        browser.show(&context, screen, None, enabled);
+                        browser.show(&context, screen, true, enabled);
                     },
                 );
             }
@@ -654,7 +654,7 @@ fn blocked_browser_keeps_control_colors_and_popups_cover_every_strip_surface() {
                             ui.label("Popup");
                         })
                         .expect("popup");
-                    browser.show(&context, screen, None, true);
+                    browser.show(&context, screen, true, true);
 
                     for point in [egui::pos2(200.0, 30.0), egui::pos2(500.0, 370.0)] {
                         if context.cumulative_frame_nr() > 9 {
@@ -1024,7 +1024,7 @@ fn action_frame(
     }
     let output = context.run_ui(input, |ui| {
         target = browser
-            .show(ui.ctx(), ui.ctx().content_rect(), None, true)
+            .show(ui.ctx(), ui.ctx().content_rect(), true, true)
             .or(target.take());
     });
     (output, target)

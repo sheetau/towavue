@@ -12014,10 +12014,12 @@ where
             self.filmstrip_browser.current_path = self.path.clone();
             self.filmstrip_browser.notice = self.status_notice();
             projection_changed = self.filmstrip_browser.project(source).1;
-            if let Some(target) = self
-                .filmstrip_browser
-                .show(context, status, source, enabled)
-            {
+            if let Some(target) = self.filmstrip_browser.show(
+                context,
+                status,
+                self.status_separator_visible(),
+                enabled,
+            ) {
                 match target {
                     filmstrip_browser::Action::Menu(intent) => {
                         actions.push(UiAction::ThumbnailMenu(intent))

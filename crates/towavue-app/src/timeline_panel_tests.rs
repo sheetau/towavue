@@ -593,3 +593,53 @@ fn timeline_resize_feedback_reaches_gpu_without_opacity_changes() {
         .expect("GPU check");
     assert!(trial.0);
 }
+
+#[test]
+fn filmstrip_preserves_the_combined_timeline_status_boundary() {
+    let Some(_) = crate::tests::isolated_test_root(
+        "timeline_edit::panel_tests::filmstrip_preserves_the_combined_timeline_status_boundary",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        for kind in [MediaKind::Audio, MediaKind::Video] {
+            let mut app = setup(kind, density);
+            let context = app.ui_context.clone().expect("context");
+            context.global_style_mut(chrome::style);
+            for timeline in [true, false] {
+                app.timeline_open = timeline;
+                for filmstrip in [false, true] {
+                    app.filmstrip_open = filmstrip;
+                    for _ in 0..3 {
+                        let output = context.run_ui(
+                            egui::RawInput {
+                                screen_rect: Some(egui::Rect::from_min_size(
+                                    egui::Pos2::ZERO,
+                                    egui::vec2(640.0, 400.0),
+                                )),
+                                ..Default::default()
+                            },
+                            |ui| app.draw_ui(ui, &mut Vec::new()),
+                        );
+                        let status = egui::containers::panel::PanelState::load(
+                            &context,
+                            egui::Id::new("status"),
+                        )
+                        .expect("status panel")
+                        .outer_rect;
+                        let has_status_border = output.shapes.iter().any(|shape| {
+                            matches!(&shape.shape, egui::Shape::LineSegment { points, stroke }
+                                if stroke.color == chrome::BORDER
+                                    && (points[1].x - points[0].x).abs() > 630.0
+                                    && (points[0].y - status.top()).abs() < 1.0)
+                        });
+                        assert_eq!(
+                            has_status_border, !timeline,
+                            "density={density}, kind={kind:?}, timeline={timeline}, filmstrip={filmstrip}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}

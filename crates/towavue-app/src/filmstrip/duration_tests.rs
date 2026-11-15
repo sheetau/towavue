@@ -195,7 +195,7 @@ fn gallery_diagonal_and_duration_placement_balance_extreme_aspect_ratios() {
     ] {
         for scale in [1.0, 1.05] {
             let image = gallery_thumbnail(cell, size, scale);
-            assert!((image.size().length() - 136.0 * scale).abs() < 0.001);
+            assert!((image.size().length() - layout::DIAMETER * scale).abs() < 0.001);
             assert_eq!(image.center(), cell.center());
             for badge_size in [egui::vec2(32.0, 17.0), egui::vec2(78.0, 17.0)] {
                 let badge = duration_background(image, badge_size, true);
@@ -378,7 +378,7 @@ fn gallery_video_geometry_excludes_transparent_padding_and_preserves_black_pixel
         1.0,
     );
     assert!((rect.width() / rect.height() - 3.0 / 8.0).abs() < 0.001);
-    assert!((rect.size().length() - 136.0).abs() < 0.001);
+    assert!((rect.size().length() - layout::DIAMETER).abs() < 0.001);
 }
 
 #[test]
@@ -535,7 +535,12 @@ fn gallery_grid_reaches_gpu_without_card_backgrounds() {
                     if frame == 7 {
                         let idle = idle_bounds.expect("idle frame");
                         assert_eq!(bounds.center(), idle.center());
-                        assert_eq!(bounds, idle, "hover zoom stays inside the original frame");
+                        // Clipping reconstructs fractional bounds through center/size math.
+                        assert!(
+                            bounds.min.distance(idle.min) * density < 0.001
+                                && bounds.max.distance(idle.max) * density < 0.001,
+                            "hover zoom stays inside the original frame: {bounds:?}, {idle:?}"
+                        );
                     }
                     let rail_marker = output
                         .shapes

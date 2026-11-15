@@ -112,7 +112,7 @@ fn gallery_tiles_are_centered_with_open_spacing_and_status_tracks_the_visible_da
                 .collect();
             row.sort_by(|a, b| a.1.x0.total_cmp(&b.1.x0));
             let tolerance = 1.0 / f64::from(density);
-            let inset = (136.0 - 136.0 / std::f64::consts::SQRT_2) * 0.5;
+            let inset = (136.0 - 120.0 / std::f64::consts::SQRT_2) * 0.5;
             assert!(
                 (first.x0 - (f64::from(size.x) - row.last().expect("row").1.x1)).abs() <= tolerance,
                 "grid centers against the window, ignoring the rail: {row:?}"
@@ -819,7 +819,7 @@ fn gallery_month_rail_tracks_filtered_cards_and_navigates_without_opening_media(
         // ScrollArea snaps to physical pixels, then egui's logical layout grid.
         let tolerance = 1.0 / f64::from(density) + f64::from(egui::emath::GUI_ROUNDING);
         assert!(
-            (selected_top - media_top - (136.0 - 136.0 / std::f64::consts::SQRT_2) * 0.5).abs()
+            (selected_top - media_top - (136.0 - 120.0 / std::f64::consts::SQRT_2) * 0.5).abs()
                 <= tolerance,
             "selected month aligns its first row at {density}x: {selected_top} vs {media_top}"
         );
@@ -866,7 +866,7 @@ fn gallery_month_rail_tracks_filtered_cards_and_navigates_without_opening_media(
         assert!(
             (card_top(&output, "july-10.png")
                 - media_top
-                - (136.0 - 136.0 / std::f64::consts::SQRT_2) * 0.5)
+                - (136.0 - 120.0 / std::f64::consts::SQRT_2) * 0.5)
                 .abs()
                 <= tolerance,
             "keyboard activation uses the same month target"

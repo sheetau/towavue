@@ -70,20 +70,21 @@ pub(crate) mod swipe;
 // Retain the transfer implementation while Gallery gestures scroll the grid.
 const GALLERY_DRAG_OUT: bool = false;
 pub(crate) const GALLERY_GAP: f32 = 48.0;
-const GALLERY_DIAMETER: f32 = 136.0;
+const GALLERY_CELL_SIZE: f32 = 136.0;
+const GALLERY_DIAMETER: f32 = layout::DIAMETER;
 
 pub(crate) fn gallery_side_inset(width: f32) -> f32 {
     let minimum = gallery_minimum_inset(width);
     let available = (width - 2.0 * minimum).max(1.0);
-    let columns = ((available + GALLERY_GAP) / (GALLERY_DIAMETER + GALLERY_GAP))
+    let columns = ((available + GALLERY_GAP) / (GALLERY_CELL_SIZE + GALLERY_GAP))
         .floor()
         .max(1.0);
-    let grid = columns * GALLERY_DIAMETER.min(available) + (columns - 1.0) * GALLERY_GAP;
+    let grid = columns * GALLERY_CELL_SIZE.min(available) + (columns - 1.0) * GALLERY_GAP;
     (width - grid) / 2.0
 }
 
 pub(crate) fn gallery_minimum_inset(width: f32) -> f32 {
-    80.0_f32.min(((width - GALLERY_DIAMETER) / 2.0).max(8.0))
+    80.0_f32.min(((width - GALLERY_CELL_SIZE) / 2.0).max(8.0))
 }
 
 fn gallery_thumbnail(cell: Rect, size: Vec2, scale: f32) -> Rect {

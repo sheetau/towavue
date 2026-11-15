@@ -83,7 +83,7 @@ impl Grid {
 
 pub(super) fn gallery_cells(width: f32, height: f32) -> (usize, f32) {
     let mut columns =
-        (((width + GALLERY_GAP) / (GALLERY_DIAMETER + GALLERY_GAP)).floor() as usize).max(1);
+        (((width + GALLERY_GAP) / (GALLERY_CELL_SIZE + GALLERY_GAP)).floor() as usize).max(1);
     while columns > 1 {
         let cell = (width - (columns - 1) as f32 * GALLERY_GAP) / columns as f32;
         let rows = (height / (cell + GALLERY_GAP)).ceil() as usize + 1;

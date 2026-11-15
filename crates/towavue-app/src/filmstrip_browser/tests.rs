@@ -606,6 +606,25 @@ fn blocked_browser_keeps_control_colors_and_popups_cover_every_strip_surface() {
                     },
                 );
             }
+            let disabled_arrow = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Mesh(mesh)
+                        if mesh.calc_bounds().contains(egui::pos2(41.0, 385.0)) =>
+                    {
+                        Some(mesh)
+                    }
+                    _ => None,
+                })
+                .expect("disabled forward arrow");
+            assert!(
+                disabled_arrow
+                    .vertices
+                    .iter()
+                    .all(|vertex| vertex.color == chrome::DISABLED),
+                "disabled history uses opaque #2A without a second opacity reduction"
+            );
             let mut labels: Vec<_> = output
                 .shapes
                 .iter()

@@ -288,8 +288,11 @@ impl Browser {
                             Text::CommandHistoryBack
                         },
                     );
+                    let opacity = ui.opacity();
                     let response = ui
                         .add_enabled_ui(self.navigation[index], |ui| {
+                            // The icon already supplies the disabled color.
+                            ui.set_opacity(opacity);
                             crate::status_bar::icon_at(
                                 ui,
                                 rect,

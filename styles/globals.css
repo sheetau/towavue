@@ -426,6 +426,13 @@ svg {
   place-items: center;
   height: var(--thumbnail-diagonal);
 }
+/* Hide the start of a partial row and every cell after it. */
+@media (width > 680px) {
+  .gallery-cell:nth-child(5n + 1):nth-last-child(-n + 4),
+  .gallery-cell:nth-child(5n + 1):nth-last-child(-n + 4) ~ .gallery-cell {
+    display: none;
+  }
+}
 .media-thumbnail {
   width: calc(var(--thumbnail-diagonal) * var(--image-width));
   height: calc(var(--thumbnail-diagonal) * var(--image-height));
@@ -957,6 +964,10 @@ html[lang="ja"] .final-download h2 {
     --thumbnail-diagonal: 22cqw;
     padding: 7cqw;
     gap: 7cqw 4cqw;
+  }
+  .gallery-cell:nth-child(3n + 1):nth-last-child(-n + 2),
+  .gallery-cell:nth-child(3n + 1):nth-last-child(-n + 2) ~ .gallery-cell {
+    display: none;
   }
   .demo-statusbar {
     font-size: 10px;

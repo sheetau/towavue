@@ -30,6 +30,16 @@ function FeatureColumns({ items }) {
 }
 
 export function LandingPage({ locale = "en" }) {
+  const [photos, setPhotos] = useState(media.photos);
+  useEffect(() => {
+    const order = [...media.photos];
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    setPhotos(order);
+  }, []);
+
   const [downloadStatus, setDownloadStatus] = useState("idle");
   useEffect(() => {
     if (downloadStatus !== "success" && downloadStatus !== "error") return;
@@ -63,7 +73,6 @@ export function LandingPage({ locale = "en" }) {
           <link key={code} rel="alternate" hrefLang={code} href={`${siteUrl}/${code === "en" ? "" : `${code}/`}`} />
         ))}
         <link rel="alternate" hrefLang="x-default" href={`${siteUrl}/`} />
-        <link rel="icon" href={asset("favicon.ico")} sizes="any" />
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content="towavue" />
         <meta property="og:title" content={content.title} />
@@ -124,7 +133,7 @@ export function LandingPage({ locale = "en" }) {
                 <a className="button github-star" href={repository} target="_blank" rel="noreferrer">Star on GitHub</a>
               </div>
             </div>
-            <HeroDemo content={content.demo} />
+            <HeroDemo content={content.demo} photos={photos} />
           </section>
           <section className="section benchmark-section" aria-labelledby="benchmark-title">
             <SectionHeading id="benchmark-title" content={content.benchmark} locale={locale} />
@@ -147,7 +156,7 @@ export function LandingPage({ locale = "en" }) {
           </section>
           <section className="section discovery-section" aria-labelledby="discovery-title">
             <SectionHeading id="discovery-title" content={content.discovery} locale={locale} />
-            <FilmstripDemo content={content.filmstrip} />
+            <FilmstripDemo content={content.filmstrip} photos={photos.slice(0, 15)} />
             <FeatureColumns items={content.discovery.items} />
           </section>
           <section className="section final-download" aria-labelledby="closing-title">

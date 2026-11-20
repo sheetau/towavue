@@ -1,11 +1,8 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { useEntranceAnimation } from "./useEntranceAnimation";
-import media from "../site/gallery.json";
 import { MediaThumbnail } from "./MediaThumbnail";
 
-const photos = media.filmstripIds.map((id) => media.photos.find((photo) => photo.id === id));
-
-export function FilmstripDemo({ content }) {
+export function FilmstripDemo({ content, photos }) {
   const [active, setActive] = useState(1);
   const [bounds, setBounds] = useState(null);
   const strip = useRef(null);
@@ -27,7 +24,7 @@ export function FilmstripDemo({ content }) {
     const observer = new ResizeObserver(measure);
     observer.observe(strip.current);
     return () => observer.disconnect();
-  }, [active]);
+  }, [active, photos]);
 
   const finishEntrance = useEntranceAnimation(strip, (timing) => {
     const offset = Math.max(0, strip.current.clientWidth + strip.current.scrollLeft - bounds.left - bounds.width - 12);

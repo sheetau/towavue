@@ -41,6 +41,7 @@ export default function Document(props) {
   const locale = props.__NEXT_DATA__?.props?.pageProps?.locale ?? "en";
   return <Html lang={locale}>
     <Head>
+      <link rel="icon" href={asset("favicon.ico")} sizes="any" />
       <meta name="theme-color" content="#000000" />
       <meta name="color-scheme" content="dark" />
       <meta name="darkreader-lock" />

@@ -1,17 +1,3 @@
-export function Logo({ className = "" }) {
-  return (
-    <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 27.68 27.68" fill="none" stroke="currentColor" strokeWidth="2" strokeMiterlimit="10" aria-hidden="true">
-      <line x1="2.17" y1="2.17" x2="9.82" y2="9.82" />
-      <line x1="2.17" y1="25.5" x2="10.21" y2="17.47" />
-      <line x1="17.47" y1="10.21" x2="25.5" y2="2.17" />
-      <path d="M9.82,1h-4.82c-2.21,0-4,1.79-4,4v4.82" />
-      <path d="M26.68,10.21v-5.21c0-2.21-1.79-4-4-4h-5.21" />
-      <path d="M17.47,26.68h5.21c2.21,0,4-1.79,4-4v-5.21" />
-      <path d="M1,17.86v4.82c0,2.21,1.79,4,4,4h4.82" />
-    </svg>
-  );
-}
-
 // Header artwork: the supplied coordinates imply a 17.42-square viewBox
 // and a one-unit stroke (the .35 inset is half its diagonal projection).
 export function CubeLogo({ className = "" }) {

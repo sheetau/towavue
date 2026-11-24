@@ -4,6 +4,7 @@ const TAU = Math.PI * 2;
 const random = (min, max) => min + Math.random() * (max - min);
 const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 const smooth = (n) => { const t = clamp(n, 0, 1); return t * t * (3 - 2 * t); };
+const horizontalOpacity = (x, width) => 0.8 + 0.2 * smooth(Math.abs(x / width - 0.5) / 0.43);
 const BODY_PROFILE = [[0, 0], [0.055, 0.052], [0.19, 0.104], [0.34, 0.096], [0.53, 0.058], [0.72, 0.017], [0.77, 0.012]];
 const BODY_GLYPHS = [".", ":", "+", "=", "x", "%", "#", "*"];
 const FIN_GLYPHS = [".", "-", "/", "|", "\\", "-", "/", ":"];
@@ -358,10 +359,8 @@ export function createAmbientFish(canvas) {
         const level = clamp(Math.round((brightness - 4) / 2), 0, SHADES - 1);
         const pattern = Math.abs(Math.floor(along * 39) * 7 + Math.floor(across * 80) * 3 + f.glyphOffset) % 8;
         const glyph = pattern + (body ? 0 : 8);
-        // The quiet center protects text without any scroll-linked movement.
-        const edge = smooth(Math.abs(x / width - 0.5) / 0.43);
         const depth = 0.78 + 0.16 * Math.sin(time * f.depthRate + f.seed);
-        ctx.globalAlpha = pixels[index + 3] / 255 * (0.52 + edge * 0.48) * depth;
+        ctx.globalAlpha = pixels[index + 3] / 255 * depth * horizontalOpacity(x, width);
         ctx.drawImage(atlas.canvas, glyph * atlas.tileW, level * atlas.tileH, atlas.tileW, atlas.tileH, col * cw, row * ch, cw, ch);
       }
     }
@@ -387,8 +386,7 @@ export function createAmbientFish(canvas) {
           const glyph = Math.abs(dx) < 0.38 ? 3 : Math.abs(dy) < 0.38 ? 1 : dx * dy > 0 ? 4 : 2;
           const x = Math.round((ripple.x + Math.cos(angle) * radius) / cw) * cw;
           const y = Math.round((ripple.y + Math.sin(angle) * radius) / ch) * ch;
-          const edge = smooth(Math.abs(x / width - 0.5) / 0.43);
-          ctx.globalAlpha = fade * (0.55 + edge * 0.20) * ripple.strength;
+          ctx.globalAlpha = fade * 0.75 * ripple.strength * horizontalOpacity(x, width);
           ctx.drawImage(atlas.canvas, (16 + glyph) * atlas.tileW, 28 * atlas.tileH,
             atlas.tileW, atlas.tileH, x, y, cw, ch);
         }
